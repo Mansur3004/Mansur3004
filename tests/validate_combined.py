@@ -1,9 +1,10 @@
 """Offline checks for the single Greenplum script; only synthetic data.
 
 Dependencies: duckdb, pglast. Run: python tests/validate_combined.py
-The test engine removes Greenplum storage/distribution options, implements
-one-argument btrim through trim and pins the report clock. Production SQL
-is parsed separately by pglast before these execution adaptations.
+The test engine expands the ETL macros with fixed test values, removes
+Greenplum storage/distribution options and implements one-argument btrim
+through trim. Expanded production SQL is parsed separately by pglast
+before these execution adaptations.
 """
 
 from pathlib import Path
@@ -17,20 +18,36 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'sql/build_questionnaire_application_status.sql'
 S = 'sbx_pre_orb_fd'
 FINAL = f'{S}.prt_tech_questionnaire_application_status'
+TEST_MACROS = {
+    'db_sbx': S,
+    'p_db_bdm': 'bdm',
+    'P_BEGIN_DATE': "'2025-01-01'",
+    'p_max_date': "'2999-12-31'",
+    'p_report_timestamp': "'2026-10-15 12:00:00'",
+    'p_min_coverage_pct': '10.0',
+    'p_kn_kk_link_mode': "'ALL'",
+    'p_bdm_limit_by_begin_date': 'true',
+}
 
 
-def postgres_sql():
-    return re.sub(r'\bdistributed\s+randomly\s*;', ';', SCRIPT.read_text(), flags=re.I)
+def expand_macros(source, overrides=None):
+    values = TEST_MACROS | (overrides or {})
+    return re.sub(r'&([A-Za-z_][A-Za-z0-9_]*)',
+                  lambda match: values[match.group(1)], source)
 
 
-def execution_sql():
+def postgres_sql(overrides=None):
+    return re.sub(r'\bdistributed\s+randomly\s*;', ';',
+                  expand_macros(SCRIPT.read_text(), overrides), flags=re.I)
+
+
+def execution_sql(overrides=None):
     sql = re.sub(
         r'with\s*\(appendonly\s*=\s*true,\s*orientation\s*=\s*column,\s*'
         r'compresstype\s*=\s*zstd,\s*compresslevel\s*=\s*5\)',
-        '', postgres_sql(), flags=re.I,
+        '', postgres_sql(overrides), flags=re.I,
     )
-    return sql.replace('cast(current_timestamp as timestamp) as report_dttm',
-                       "timestamp '2026-10-15 12:00:00' as report_dttm")
+    return sql
 
 
 def make_db(integer_flags=False):
@@ -220,13 +237,11 @@ def check_fixture():
     print('PASS: NULL/sentinel keys and UZ without child preserved; no NULL or -1 joins.')
     print('PASS: history flag; conflicting attributes; unique pairs; repeatability; inputs unchanged.')
     # Test the supported route switch without changing source data or common flags.
-    db.execute(execution_sql().replace("cast('ALL' as text) as kn_kk_link_mode",
-                                       "cast('DIRECT' as text) as kn_kk_link_mode"))
+    db.execute(execution_sql({'p_kn_kk_link_mode': "'DIRECT'"}))
     assert rows(db, f'select sum(error_count) from {S}.prt_qas_checks') == [(0,)]
     assert rows(db, f'select count(*) from {S}.prt_qas_kn_kk_links') == [(5,)]
     print('PASS: switching to DIRECT retains every input entity.')
-    db.execute(execution_sql().replace("cast('ALL' as text) as kn_kk_link_mode",
-                                       "cast('UZ' as text) as kn_kk_link_mode"))
+    db.execute(execution_sql({'p_kn_kk_link_mode': "'UZ'"}))
     assert rows(db, f'select sum(error_count) from {S}.prt_qas_checks') == [(0,)]
     assert rows(db, f'select count(*) from {S}.prt_qas_kn_kk_links') == [(13,)]
     print('PASS: switching to UZ retains every input entity.')
@@ -281,10 +296,33 @@ def check_integer_tas_flags():
     print('PASS: TAS flags can be boolean or prototype integer 0/1.')
 
 
+def check_macro_parameters():
+    assert 'prt_qas_params' not in SCRIPT.read_text()
+    assert set(re.findall(r'&([A-Za-z_][A-Za-z0-9_]*)', SCRIPT.read_text())) == set(TEST_MACROS)
+    db = make_db()
+    populate(db)
+    db.execute(execution_sql({
+        'p_report_timestamp': "'2026-10-16 08:30:00'",
+        'p_min_coverage_pct': '12.5',
+        'p_bdm_limit_by_begin_date': 'false',
+    }))
+    assert rows(db, f'select sum(error_count) from {S}.prt_qas_checks') == [(0,)]
+    assert rows(db, f'select distinct reference_coverage_pct from {S}.prt_qas_coverage') == [(12.5,)]
+    assert rows(db, f"select count(distinct report_dttm) from {FINAL}") == [(1,)]
+    assert rows(db, f"select count(*) from {FINAL} where report_dttm <> timestamp '2026-10-16 08:30:00'") == [(0,)]
+    assert rows(db, f'select count(*) from {S}.prt_qas_kn_kk_bdm_application where application_rk = 778') == [(1,)]
+    db.execute(execution_sql({'P_BEGIN_DATE': "'2026-01-01'"}))
+    assert rows(db, f'select count(*) from {FINAL}') == [(0,)]
+    db.execute(execution_sql({'p_kn_kk_link_mode': 'NULL'}))
+    assert rows(db, f"select error_count from {S}.prt_qas_checks where check_name = 'INVALID_LINK_MODE'") == [(1,)]
+    print('PASS: macro overrides, one report timestamp, date switch and NULL mode validation.')
+
+
 if __name__ == '__main__':
     print('PARSED PostgreSQL statements:', len(parse_sql(postgres_sql())))
     check_fixture()
     check_all_marked_statuses()
     check_empty()
     check_integer_tas_flags()
+    check_macro_parameters()
     print('Local validation only: bank data, ETL completeness and Greenplum plans remain unverified.')
