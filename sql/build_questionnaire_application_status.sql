@@ -18,17 +18,38 @@
   &p_bdm_limit_by_begin_date - ограничивать BDM началом периода;
                                по умолчанию: true; для отключения: false
 
+  &p_prod_kn_name            - наименование продукта 25/35 уровня по бизнес-плану
+                               для Потребкредитов; по умолчанию: 'Потребкредит'
+  &p_prod_kk_name            - наименование продукта 25/35 уровня по бизнес-плану
+                               для Кредитных карт; по умолчанию: 'Кредитные карты'
+  &p_prod_auto_name          - наименование продукта 25/35 уровня по бизнес-плану
+                               для Автокредитов; по умолчанию: 'Автокредит'
+
+  &p_kn_verification_status  - статусы пройденной верификации Потребкредита;
+                               по умолчанию: '0', '10.0', 'одобрено', 'CHECK_LIST_EMPTY',
+                               'CHECK_LIST_ANTIFRAUD_OR_PRODUCT'
+  &p_kk_verification_status  - статусы пройденной верификации Кредитных карт;
+                               по умолчанию: 'DONE', 'COURIER'
+  &p_auto_verification_status - статусы пройденной верификации Автокредита;
+                               по умолчанию: 'APPROVE_RKK', 'APPROVED', 'PRE_APPROVED',
+                               'APPROVE_CALL2', 'APPROVE_CALL3', 'ORDER_CREATED',
+                               'VERIFICATION', 'DRIVER_CARD_ISSUE',
+                               'DRIVER_CARD_ISSUE_UPLOADED', 'DOSSIER_UPLOADED',
+                               'DEAL_VER', 'CREDIT_ISSUED', 'PRODUCT_BASKET_SIGNED'
+
 Это параметры макроподстановки, а не SQL-команды объявления переменных.
 Имена схем подставляются БЕЗ кавычек; даты/время/строки — в одинарных кавычках;
 числа и true/false — БЕЗ кавычек. Кавычки внутри SQL повторно не добавляются.
+Списки статусов — SQL-строки через запятую, без внешних скобок;
+в запросах используются как status_cd in (&p_kn_verification_status) и аналогично.
 &p_report_timestamp задаётся фиксированным значением один раз перед запуском,
 чтобы все шаги использовали тот же момент отчёта, как и раньше.
 
 ПОДТВЕРЖДЁННОЕ ПРАВИЛО: любой выделенный зелёным/жёлтым статус означает,
 что верификация была пройдена. Флаг — наличие такого статуса КОГДА-ЛИБО
 в доступной истории до report_dttm. Цвет не участвует в расчёте.
-Все 20 статусов, видимых выделенными на присланных скриншотах, в шаге 1.1.
-Если в остальных частях status_by_product есть ещё выделения, дописать их там.
+Все 20 выделенных статусов со скриншотов — значения по умолчанию списков
+макропеременных в блоке 0.1. Дополнительные статусы добавлять в эти списки.
 
 ИСТОЧНИКИ ДЛЯ ПРОВЕРКИ ИМЁН:
   &db_sbx.tech_questionnaire_status — история/текущий срез TQS;
@@ -62,41 +83,7 @@ DROP удаляет только результаты этого скрипта 
 -- Источники/продукты проверяются вместе: одинаковый код статуса в другом
 -- продукте не должен автоматически подтверждать верификацию.
 
--- 1.1. Подтверждённые статусы пройденной верификации из обеих заливок.
-drop table if exists &db_sbx.prt_qas_verification_status;
-create table &db_sbx.prt_qas_verification_status
-with (appendonly = true, orientation = column, compresstype = zstd, compresslevel = 5)
-as
-select
-    cast(v.product_branch as text) as product_branch,
-    cast(v.level25_product_bp_nm as text) as level25_product_bp_nm,
-    cast(v.src_pattern as text) as src_pattern,
-    cast(v.status_cd as text) as status_cd
-from (values
-        ('KN', 'Потребкредит', '1376%', '0'),
-        ('KN', 'Потребкредит', '1376%', '10.0'),
-        ('KN', 'Потребкредит', '1376%', 'одобрено'),
-        ('KN', 'Потребкредит', '1376%', 'CHECK_LIST_EMPTY'),
-        ('KN', 'Потребкредит', '1376%', 'CHECK_LIST_ANTIFRAUD_OR_PRODUCT'),
-        ('KK', 'Кредитные карты', '1383%', 'DONE'),
-        ('KK', 'Кредитные карты', '1383%', 'COURIER'),
-        ('AUTO', 'Автокредит', '1388%', 'APPROVE_RKK'),
-        ('AUTO', 'Автокредит', '1388%', 'APPROVED'),
-        ('AUTO', 'Автокредит', '1388%', 'PRE_APPROVED'),
-        ('AUTO', 'Автокредит', '1388%', 'APPROVE_CALL2'),
-        ('AUTO', 'Автокредит', '1388%', 'APPROVE_CALL3'),
-        ('AUTO', 'Автокредит', '1388%', 'ORDER_CREATED'),
-        ('AUTO', 'Автокредит', '1388%', 'VERIFICATION'),
-        ('AUTO', 'Автокредит', '1388%', 'DRIVER_CARD_ISSUE'),
-        ('AUTO', 'Автокредит', '1388%', 'DRIVER_CARD_ISSUE_UPLOADED'),
-        ('AUTO', 'Автокредит', '1388%', 'DOSSIER_UPLOADED'),
-        ('AUTO', 'Автокредит', '1388%', 'DEAL_VER'),
-        ('AUTO', 'Автокредит', '1388%', 'CREDIT_ISSUED'),
-        ('AUTO', 'Автокредит', '1388%', 'PRODUCT_BASKET_SIGNED')
-) v(product_branch, level25_product_bp_nm, src_pattern, status_cd)
-distributed randomly;
-
--- 1.2. История анкеты. Здесь НЕТ фильтра effective_to_dttm = 2999-12-31.
+-- 1.1. История анкеты. Здесь НЕТ фильтра effective_to_dttm = 2999-12-31.
 drop table if exists &db_sbx.prt_qas_verification_history;
 create table &db_sbx.prt_qas_verification_history
 with (appendonly = true, orientation = column, compresstype = zstd, compresslevel = 5)
@@ -104,17 +91,24 @@ as
 select
     q.questionnaire_rk, q.src_cd, q.status_cd, q.level25_product_bp_nm,
     q.effective_from_dttm, q.effective_to_dttm,
-    case when v.status_cd is not null then 1 else 0 end as verified_status_hit
+    case
+        when q.src_cd like '1376%'
+         and q.level25_product_bp_nm = cast(&p_prod_kn_name as text)
+         and q.status_cd in (&p_kn_verification_status) then 1
+        when q.src_cd like '1383%'
+         and q.level25_product_bp_nm = cast(&p_prod_kk_name as text)
+         and q.status_cd in (&p_kk_verification_status) then 1
+        when q.src_cd like '1388%'
+         and q.level25_product_bp_nm = cast(&p_prod_auto_name as text)
+         and q.status_cd in (&p_auto_verification_status) then 1
+        else 0
+    end as verified_status_hit
 from &db_sbx.tech_questionnaire_status q
-left join &db_sbx.prt_qas_verification_status v
-  on q.src_cd like v.src_pattern
- and q.level25_product_bp_nm = v.level25_product_bp_nm
- and q.status_cd = v.status_cd
 where (q.src_cd like '1376%' or q.src_cd like '1383%' or q.src_cd like '1388%')
   and (q.effective_from_dttm <= cast(&p_report_timestamp as timestamp) or q.effective_from_dttm is null)
 distributed randomly;
 
--- 1.3. Один флаг на ключ анкеты: любой такой статус в доступной истории.
+-- 1.2. Один флаг на ключ анкеты: любой такой статус в доступной истории.
 drop table if exists &db_sbx.prt_qas_verification_flags;
 create table &db_sbx.prt_qas_verification_flags
 with (appendonly = true, orientation = column, compresstype = zstd, compresslevel = 5)
@@ -129,7 +123,7 @@ where h.questionnaire_rk is not null and h.questionnaire_rk <> -1
 group by h.questionnaire_rk, h.src_cd
 distributed randomly;
 
--- 1.4. Текущая когорта анкет. Строки с NULL ключа/даты не теряем.
+-- 1.3. Текущая когорта анкет. Строки с NULL ключа/даты не теряем.
 drop table if exists &db_sbx.prt_qas_questionnaire_current_raw;
 create table &db_sbx.prt_qas_questionnaire_current_raw
 with (appendonly = true, orientation = column, compresstype = zstd, compresslevel = 5)
@@ -142,9 +136,9 @@ select
     case when q.src_cd like '1376%' then 'KN'
          when q.src_cd like '1383%' then 'KK'
          when q.src_cd like '1388%' then 'AUTO' end as product_branch,
-    case when (q.src_cd like '1376%' and q.level25_product_bp_nm = 'Потребкредит')
-           or (q.src_cd like '1383%' and q.level25_product_bp_nm = 'Кредитные карты')
-           or (q.src_cd like '1388%' and q.level25_product_bp_nm = 'Автокредит')
+    case when (q.src_cd like '1376%' and q.level25_product_bp_nm = cast(&p_prod_kn_name as text))
+           or (q.src_cd like '1383%' and q.level25_product_bp_nm = cast(&p_prod_kk_name as text))
+           or (q.src_cd like '1388%' and q.level25_product_bp_nm = cast(&p_prod_auto_name as text))
          then 1 else 0 end as product_match_flg
 from &db_sbx.tech_questionnaire_status q
 where (q.src_cd like '1376%' or q.src_cd like '1383%' or q.src_cd like '1388%')
@@ -154,7 +148,7 @@ where (q.src_cd like '1376%' or q.src_cd like '1383%' or q.src_cd like '1388%')
   and (q.questionnaire_dttm >= cast(cast(&P_BEGIN_DATE as date) as timestamp) or q.questionnaire_dttm is null)
 distributed randomly;
 
--- 1.5. Ключи и атрибуты анкет + общий флаг. NULL ключи сохраняются раздельно.
+-- 1.4. Ключи и атрибуты анкет + общий флаг. NULL ключи сохраняются раздельно.
 drop table if exists &db_sbx.prt_qas_questionnaire;
 create table &db_sbx.prt_qas_questionnaire
 with (appendonly = true, orientation = column, compresstype = zstd, compresslevel = 5)

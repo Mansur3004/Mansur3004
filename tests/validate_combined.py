@@ -27,6 +27,12 @@ TEST_MACROS = {
     'p_min_coverage_pct': '10.0',
     'p_kn_kk_link_mode': "'ALL'",
     'p_bdm_limit_by_begin_date': 'true',
+    'p_prod_kn_name': "'Потребкредит'",
+    'p_prod_kk_name': "'Кредитные карты'",
+    'p_prod_auto_name': "'Автокредит'",
+    'p_kn_verification_status': "'0', '10.0', 'одобрено', 'CHECK_LIST_EMPTY', 'CHECK_LIST_ANTIFRAUD_OR_PRODUCT'",
+    'p_kk_verification_status': "'DONE', 'COURIER'",
+    'p_auto_verification_status': "'APPROVE_RKK', 'APPROVED', 'PRE_APPROVED', 'APPROVE_CALL2', 'APPROVE_CALL3', 'ORDER_CREATED', 'VERIFICATION', 'DRIVER_CARD_ISSUE', 'DRIVER_CARD_ISSUE_UPLOADED', 'DOSSIER_UPLOADED', 'DEAL_VER', 'CREDIT_ISSUED', 'PRODUCT_BASKET_SIGNED'",
 }
 
 
@@ -267,7 +273,7 @@ def check_all_marked_statuses():
     add_q(db, 4001, 'NEG_KN', '1376.1', 'Потребкредит', status='DONE')
     add_q(db, 4002, 'NEG_KK', '1383.1', 'Кредитные карты', status='SCORING')
     db.execute(execution_sql())
-    assert rows(db, f'select count(*) from {S}.prt_qas_verification_status') == [(20,)]
+    assert rows(db, "select count(*) from information_schema.tables where table_name = 'prt_qas_verification_status'") == [(0,)]
     assert rows(db, f'''select count(*) from {S}.prt_qas_questionnaire
                         where questionnaire_rk between 3000 and 3019 and verification_flg''') == [(20,)]
     assert rows(db, f'''select count(*) from {S}.prt_qas_questionnaire
@@ -298,6 +304,7 @@ def check_integer_tas_flags():
 
 def check_macro_parameters():
     assert 'prt_qas_params' not in SCRIPT.read_text()
+    assert 'prt_qas_verification_status' not in SCRIPT.read_text()
     assert set(re.findall(r'&([A-Za-z_][A-Za-z0-9_]*)', SCRIPT.read_text())) == set(TEST_MACROS)
     db = make_db()
     populate(db)
@@ -318,6 +325,40 @@ def check_macro_parameters():
     print('PASS: macro overrides, one report timestamp, date switch and NULL mode validation.')
 
 
+def check_product_status_macros():
+    db = make_db()
+    products = [('1376.1', 'KN_CUSTOM_PRODUCT', 'KN_CUSTOM', 'CHECK_LIST_EMPTY'),
+                ('1383.1', 'KK_CUSTOM_PRODUCT', 'KK_CUSTOM', 'DONE'),
+                ('1388.1', 'AUTO_CUSTOM_PRODUCT', 'AUTO_CUSTOM', 'VERIFICATION')]
+    expected = []
+    for index, (src, product, custom_status, old_status) in enumerate(products):
+        rk = 5000 + index * 10
+        add_q(db, rk, f'CUSTOM{rk}', src, product, historical=custom_status)
+        add_q(db, rk + 1, f'OLD{rk}', src, product, status=old_status)
+        add_q(db, rk + 2, f'WRONG_LIST{rk}', src, product,
+              status=products[(index + 1) % 3][2])
+        add_q(db, rk + 3, f'MISSING_STATUS{rk}', src, product, status=None)
+        expected.extend([(rk, True, 1), (rk + 1, False, 1),
+                         (rk + 2, False, 1), (rk + 3, False, 1)])
+    add_q(db, 5100, 'WRONG_PRODUCT', '1376.1', 'Потребкредит', status='KN_CUSTOM')
+    expected.append((5100, False, 0))
+    db.execute(execution_sql({
+        'p_prod_kn_name': "'KN_CUSTOM_PRODUCT'",
+        'p_prod_kk_name': "'KK_CUSTOM_PRODUCT'",
+        'p_prod_auto_name': "'AUTO_CUSTOM_PRODUCT'",
+        'p_kn_verification_status': "'KN_CUSTOM', 'KN_CUSTOM'",
+        'p_kk_verification_status': "'KK_CUSTOM', 'KK_OTHER'",
+        'p_auto_verification_status': "'AUTO_CUSTOM'",
+    }))
+    assert rows(db, f'''select questionnaire_rk, verification_flg, product_match_flg
+                        from {S}.prt_qas_questionnaire order by questionnaire_rk''') == expected
+    assert rows(db, f'select sum(error_count) from {S}.prt_qas_checks') == [(0,)]
+    # Duplicate values in an IN list must not multiply historical records.
+    assert rows(db, f'''select history_row_count from {S}.prt_qas_verification_flags
+                        where questionnaire_rk = 5000''') == [(2,)]
+    print('PASS: all product names/lists are configurable; history, product isolation, NULL and duplicate list values.')
+
+
 if __name__ == '__main__':
     print('PARSED PostgreSQL statements:', len(parse_sql(postgres_sql())))
     check_fixture()
@@ -325,4 +366,5 @@ if __name__ == '__main__':
     check_empty()
     check_integer_tas_flags()
     check_macro_parameters()
+    check_product_status_macros()
     print('Local validation only: bank data, ETL completeness and Greenplum plans remain unverified.')
