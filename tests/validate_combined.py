@@ -421,7 +421,7 @@ def check_rk_and_target_contract():
         (1001,datetime(2025,1,1),True,901,date(2025,1,1),True,True,True,True,
          201,date(2025,2,1),None,True,False,False,False,'TEST','TEST',datetime(2026,10,15,12))]
     assert rows(db,f'''select level25_product_bp_nm,level35_product_bp_nm,quest_verification_flg
-                       from {FINAL} where questionnaire_rk=1602''')==[('Автокредит',None,False)]
+                       from {FINAL} where questionnaire_rk=1602''')==[('Автокредит','Автокредит',False)]
     assert rows(db,f'''select questionnaire_rk,application_rk,quest_verification_flg
                        from {FINAL} where questionnaire_rk=1661''')==[(1661,661,True)]
     assert rows(db,f'select count(*) from {FINAL}')==rows(db,f'select count(*) from {DETAIL}')
@@ -485,6 +485,32 @@ def check_original_status_timeline():
     print('PASS: original KN/auto priorities, second offsets, LEAD end dates and current version selection.')
 
 
+def check_equal_product_levels():
+    db=make_db()
+    add_raw(db,'ONLY_KN','KN','0')
+    add_raw(db,'ONLY_KK_LONG','CreditCard','DONE')
+    add_raw(db,'ONLY_AUTO','AutoLoan','VERIFICATION')
+    add_raw(db,'MATCHED_KN','KN','0','MATCH_NUM')
+    db.execute("insert into bdm.application values (700,'MATCH_NUM','MSCL','2999-12-31','2025-01-01')")
+    add_tas(db,700,'MATCHED_APP','MSCL',level25_product_bp_nm='Потребкредит',
+            level35_product_bp_nm='UNEXPECTED_LEVEL35')
+    add_tas(db,702,'APP_ONLY','ALPP',level25_product_bp_nm='Автокредит',level35_product_bp_nm=None)
+    db.execute(execution_sql())
+    assert rows(db,f'''select level25_product_bp_nm,level35_product_bp_nm from {FINAL}
+                       where application_rk is null order by level25_product_bp_nm''')==[
+        ('Автокредит','Автокредит'),('Кредитные карты','Кредитные карты'),('Потребкредит','Потребкредит')]
+    assert rows(db,f'''select application_rk,level25_product_bp_nm,level35_product_bp_nm from {FINAL}
+                       where application_rk is not null order by application_rk''')==[
+        (700,'Потребкредит','Потребкредит'),(702,'Автокредит','Автокредит')]
+    assert rows(db,f'''select tas_application_rk,tas_level35_product_bp_nm from {DETAIL}
+                       where tas_entity_id is not null order by tas_application_rk''')==[
+        (700,'UNEXPECTED_LEVEL35'),(702,None)]
+    assert rows(db,f'select check_name from {S}.prt_qas_checks where error_count<>0')==[]
+    assert rows(db,f'''select count(*) from {FINAL}
+                       where level35_product_bp_nm is distinct from level25_product_bp_nm''')==[(0,)]
+    print('PASS: identical product levels for all three questionnaire-only products, matched pairs and TAS-only rows; raw TAS level35 retained.')
+
+
 def check_attribute_catalog():
     catalog=(ROOT/'docs/attributes_catalog.txt').read_text()
     db=make_db();db.execute(execution_sql())
@@ -509,5 +535,6 @@ if __name__=='__main__':
     check_rk_and_target_contract()
     check_original_branch_routing()
     check_original_status_timeline()
+    check_equal_product_levels()
     check_attribute_catalog()
     print('Offline synthetic tests only; bank data and Greenplum execution remain unverified.')

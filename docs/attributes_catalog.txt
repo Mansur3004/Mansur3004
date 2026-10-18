@@ -4,9 +4,9 @@ SQL: sql/build_questionnaire_application_status.sql
 Границы достоверности
 --------------------
 Изучены все присланные скриншоты tech_questionnaire_status, включая ветки,
-приоритеты, сдвиг времени, UNION и финальный JOIN для RK. Отдельного исходного
-файла tech_questionnaire_rk в репозитории нет. Алгоритм генерации RK выше по
-потоку не показан: этот прототип использует уже созданные RK из связи с клиентом.
+приоритеты, сдвиг времени, UNION и финальный JOIN для RK. Пользователь подтвердил:
+под tech_questionnaire_rk имелся в виду tech_questionnaire_status со скриншотов.
+Прототип использует уже созданные RK из связи с клиентом, как в этом скрипте.
 Восстановлена кредитная часть для КН/КК/авто. ДК, депозиты и текущие счета — вне
 согласованного объёма итоговой витрины; их продуктовые макросписки не скопированы.
 
@@ -83,7 +83,7 @@ UTM, ID, статусы, источники, интервалы, способы 
 17. level25_product_bp_nm | text
     COALESCE(TAS.level25_product_bp_nm, TQS.level25_product_bp_nm). При несовпадении приоритет TAS, оба исходных значения сохранены в detail; конфликт показывает отчёт 4.15.
 18. level35_product_bp_nm | text
-    TAS.level35_product_bp_nm. В RAW/TQS его нет. Для анкеты без TAS — NULL до предоставления правила/справочника уровня 35.
+    COALESCE(TAS.level25_product_bp_nm, TQS.level25_product_bp_nm), как для уровня 25. Пользователь подтвердил совпадение логики уровней. Для анкеты без TAS оба уровня берутся из TQS. Исходный TAS.level35 сохранён в detail для диагностики.
 19. processed_dttm | timestamp(0)
     CAST(&p_report_timestamp AS timestamp(0)): момент текущей загрузки, один на запуск; не максимум времён источников.
 
@@ -1294,7 +1294,7 @@ TABLE &db_sbx.prt_tech_internet_funnel
   015. final_approved_flg | boolean | CAST(tas_final_approved_flg AS boolean)
   016. agr_signed_flg | boolean | CAST(tas_agr_signed_flg AS boolean)
   017. level25_product_bp_nm | text | CAST(COALESCE(tas_level25_product_bp_nm, q_level25_product_bp_nm) AS text)
-  018. level35_product_bp_nm | text | CAST(tas_level35_product_bp_nm AS text)
+  018. level35_product_bp_nm | text | CAST(COALESCE(tas_level25_product_bp_nm, q_level25_product_bp_nm) AS text)
   019. processed_dttm | timestamp(0) | CAST(&p_report_timestamp AS timestamp(0))
 
 TABLE &db_sbx.prt_qas_coverage
@@ -1318,10 +1318,9 @@ TABLE &db_sbx.prt_qas_checks
 
 5. ЧТО ЕЩЁ НУЖНО ПОЛУЧИТЬ И ГДЕ
 -------------------------------
-A. Если tech_questionnaire_rk — отдельный скрипт, нужен путь к нему в репозитории
-либо скриншоты его чтений/генерации RK. На имеющихся изображениях показано
-потребление уже созданного RK из tech_questionnaire_x_customer. Генератор RK
-не восстанавливается из row_number; прототип его не подменяет.
+A. Название скрипта уточнено пользователем: tech_questionnaire_status со скриншотов.
+Отдельный tech_questionnaire_rk не требуется. Как в исходнике, используется
+настоящий RK из tech_questionnaire_x_customer, без подмены row_number.
 
 Если один RK связан с несколькими ID, исходный LEAD строит общую историю
 по RK; в текущий срез попадёт действующая версия ID. Исторические ID остаются
@@ -1335,12 +1334,11 @@ tech_questionnaire_x_customer -> Columns и DDL. Нужны весь списо�
 типы, ключи и правила актуальности. Скриншоты подходят, копировать код не нужно.
 Для BDM на той же вкладке уточнить 3 обрезанных длинных имени.
 
-C. Для level35 у анкеты без TAS нужен утверждённый справочник/SQL из ETL TAS,
-где формируется level35_product_bp_nm: таблицы, поля связи и период действия.
-На присланных скриншотах в TQS есть только level25. Пока level35 = NULL,
-level25 берётся из TQS. Если для совпавшей пары приоритет должен быть у
-продукта анкеты, а не у TAS, требуется это бизнес-правило; сейчас TAS первый,
-оба значения и конфликт сохранены в detail.
+C. Правило уровня 35 подтверждено пользователем: его логика полностью
+совпадает с уровнем 25. Отдельный справочник не требуется. Оба итоговых поля =
+COALESCE(TAS.level25_product_bp_nm, TQS.level25_product_bp_nm), включая анкеты
+без TAS. Исходные уровни TAS и продукт анкеты сохранены в detail; расхождения
+показывает отчёт 4.15, равенство итоговых уровней проверяет prt_qas_checks.
 
 D. Для актуальности TAS: Columns/DDL и последняя выборка её ETL, чтобы подтвердить
 актуальный снимок или назвать реальный effective_to-фильтр. По processed_dttm

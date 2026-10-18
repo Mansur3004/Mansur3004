@@ -125,9 +125,9 @@ NULL/пустые ID не склеиваются; строки после report
 всех переживших исходную дедупликацию статусов. Флаг считается по RK + продукту,
 для ещё не сопоставленного ID — по ID + продукту, без объединения разных NULL ID.
 
-Итоговые поля уровня 25/35 берутся из TAS; level25 при NULL дополняется из анкеты.
-Для анкеты без TAS level35 остаётся NULL: в показанном TQS такого атрибута нет.
-Требуется справочник/правило уровня 35, если он должен заполняться для таких строк.
+Подтверждено пользователем: level35 полностью повторяет логику level25.
+Оба итоговых поля = COALESCE(TAS.level25, TQS.level25), включая анкеты без TAS.
+Исходный TAS.level35 сохраняется в detail для сравнения с этим правилом.
 processed_dttm — единый момент текущей загрузки, приведённый к timestamp(0).
 Информация вне 19 бизнес-полей остаётся в detail и промежуточных таблицах.
 
@@ -2075,7 +2075,7 @@ select
     cast(tas_final_approved_flg as boolean) as final_approved_flg,
     cast(tas_agr_signed_flg as boolean) as agr_signed_flg,
     cast(coalesce(tas_level25_product_bp_nm, q_level25_product_bp_nm) as text) as level25_product_bp_nm,
-    cast(tas_level35_product_bp_nm as text) as level35_product_bp_nm,
+    cast(coalesce(tas_level25_product_bp_nm, q_level25_product_bp_nm) as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
 from &db_sbx.prt_qas_funnel_detail
 distributed randomly;
@@ -2149,6 +2149,10 @@ union all
 select 'FINAL_PROJECTION_ROW_COUNT_MISMATCH', abs(
     (select count(*) from &db_sbx.prt_qas_funnel_detail) -
     (select count(*) from &db_sbx.prt_tech_internet_funnel))
+union all
+select 'INCONSISTENT_FINAL_PRODUCT_LEVELS', count(*)
+from &db_sbx.prt_tech_internet_funnel
+where level35_product_bp_nm is distinct from level25_product_bp_nm
 union all
 select 'INVALID_LINK_MODE', count(*)
 where cast(&p_kn_kk_link_mode as text) not in ('ALL', 'DIRECT', 'UZ')
@@ -2226,9 +2230,11 @@ union all
 select 'SECONDS_COMPONENT_DIFFERS_FROM_DURATION', count(*)
 from &db_sbx.prt_tqs_kn_auto_pre_eff_calc where full_diff_seconds <> diff_sec;
 
--- Результат 4.15: уровень 35 не выдумывается для анкеты без TAS; конфликт уровня 25 виден.
+-- Результат 4.15: исходные уровни TAS и конфликт продуктов; итоговые 25/35 равны.
 select record_type,
-       sum(case when tas_level35_product_bp_nm is null then 1 else 0 end) as missing_level35_count,
+       sum(case when tas_entity_id is not null and tas_level35_product_bp_nm is null then 1 else 0 end) as missing_tas_level35_count,
+       sum(case when tas_entity_id is not null and tas_level25_product_bp_nm is distinct from tas_level35_product_bp_nm
+                then 1 else 0 end) as tas_product_level_mismatch_count,
        sum(case when q_level25_product_bp_nm is not null and tas_level25_product_bp_nm is not null
                      and q_level25_product_bp_nm <> tas_level25_product_bp_nm then 1 else 0 end) as level25_conflict_count
 from &db_sbx.prt_qas_funnel_detail group by record_type order by record_type;
