@@ -6,6 +6,7 @@ only Greenplum storage/distribution options and implements btrim via trim.
 Run with duckdb and pglast: python tests/validate_combined.py
 """
 from pathlib import Path
+from datetime import date, datetime
 import re
 import duckdb
 from pglast import parse_sql
@@ -14,11 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'sql/build_questionnaire_application_status.sql'
 S = 'sbx_pre_orb_fd'
 RAW = 'rd_raw_orb.v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention'
-FINAL = f'{S}.prt_tech_questionnaire_application_status'
+DETAIL = f'{S}.prt_qas_funnel_detail'
+FINAL = f'{S}.prt_tech_internet_funnel'
 TEST_MACROS = {
     'db_sbx': S,
     'p_db_bdm': 'bdm',
     'p_db_rawd': 'rd_raw_orb',
+    'p_db_cdmr': 'dm_pik_fd_cdmr',
+    'p_quest_src_cd_kn_list': "'1376%'",
+    'p_quest_src_cd_kk_list': "'1383%'",
+    'p_quest_src_cd_ak_list': "'1388%'",
     'p_rds_report_dt_date': "'2024-10-01'",
     'p_min_dttm': "'1900-01-01 00:00:00'",
     'p_test_first_nm_like_text_list': "'%ТЕСТ%', '%ТКЕСТ%', '%ТКЕКСТ%', '%ТЕМСТ%', '%ЛИПОВЫЙ%', '%ЗАЯВК%', 'ПЕНСИОНН%', 'МУЛЬТИКАРТ%', 'АРХАНГЕЛЬСК%', 'ЗВОНИТЬ%', 'AAA%'",
@@ -66,8 +72,10 @@ def execution_sql(overrides=None):
 
 def make_db(integer_flags=False):
     db = duckdb.connect()
-    db.execute(f'create schema {S}; create schema rd_raw_orb; create schema bdm')
+    db.execute(f'create schema {S}; create schema rd_raw_orb; create schema bdm; create schema dm_pik_fd_cdmr')
     db.execute('create macro btrim(value) as trim(value)')
+    db.execute('''create table dm_pik_fd_cdmr.tech_questionnaire_x_customer (
+        questionnaire_id text, questionnaire_rk bigint, effective_to_dttm timestamp)''')
     db.execute(f"""
         create table {RAW} (
             questionnaire_id text, application_num text, utmcn text, utmcmd text,
@@ -204,7 +212,7 @@ def assert_fixture(db):
     assert rows(db, f'select count(*) from {S}.prt_qas_questionnaire') == [(16,)]
     assert rows(db, f'select count(*) from {S}.prt_qas_kn_kk_tas') == [(18,)]
     assert rows(db, f'select count(*) from {S}.prt_qas_auto_tas') == [(5,)]
-    assert rows(db, f'''select record_type,count(*) from {FINAL}
+    assert rows(db, f'''select record_type,count(*) from {DETAIL}
                         group by record_type order by record_type''') == [
         ('APPLICATION_ONLY',11),('MATCHED',15),('QUESTIONNAIRE_ONLY',9)]
     assert rows(db, f'''select q_total,q_matched,app_total,app_matched,
@@ -215,12 +223,12 @@ def assert_fixture(db):
                         from {S}.prt_qas_kn_kk_link_quality where product_branch='KN'
                         order by link_route''') == [
         ('DIRECT_PRODUCT',2,3,0),('UZ_ONLY',1,1,0),('UZ_PARENT',3,6,4),('UZ_SELF',3,4,1)]
-    assert rows(db, f'''select link_routes from {FINAL}
+    assert rows(db, f'''select link_routes from {DETAIL}
                         where q_questionnaire_id='Q1' and tas_application_rk=201''') == [('DIRECT_PRODUCT,UZ_PARENT',)]
-    assert rows(db, f'''select record_type,tas_application_rk,tas_src_cd from {FINAL}
+    assert rows(db, f'''select record_type,tas_application_rk,tas_src_cd from {DETAIL}
                         where tas_entity_type='UZ_ONLY' order by tas_parent_application_rk''') == [
         ('MATCHED',None,None),('APPLICATION_ONLY',None,None)]
-    assert rows(db, f'''select count(*) from {FINAL} where q_questionnaire_id='BAD_PARENT'
+    assert rows(db, f'''select count(*) from {DETAIL} where q_questionnaire_id='BAD_PARENT'
                         and record_type<>'QUESTIONNAIRE_ONLY' ''') == [(0,)]
     assert rows(db, f'''select verification_flg,history_row_count from {S}.prt_qas_questionnaire
                         where questionnaire_id='Q1' ''') == [(True,2)]
@@ -307,7 +315,7 @@ def check_cleaning():
     assert rows(db,f"select invalid_date_field_count from {S}.prt_tqs_questionnaire_checked where questionnaire_id='BAD_OPTIONAL'")==[(1,)]
     assert rows(db,f"select count(*) from {S}.prt_qas_questionnaire where questionnaire_id='123456'")==[(0,)]
     assert rows(db,f"select count(*) from {S}.prt_qas_questionnaire where questionnaire_id='1234567'")==[(1,)]
-    assert rows(db,f"select product_filter_reason from {S}.prt_tqs_questionnaire_product where questionnaire_id='UNKNOWN_CODE'")==[('OUTSIDE_OR_UNMAPPED_PRODUCT',)]
+    assert rows(db,f"select is_kn,is_kk,is_auto from {S}.prt_tqs_questionnaire_routing where questionnaire_id='UNKNOWN_CODE'")==[(0,0,0)]
     print('PASS: test names, malformed dates, leap years, masks, safe optional dates, ISO timestamps and KK IDs.')
 
 
@@ -363,7 +371,7 @@ def check_macros_and_empty():
     assert set(re.findall(r'&([A-Za-z_][A-Za-z0-9_]*)',SCRIPT.read_text()))==set(TEST_MACROS)
     assert not re.search(r'select\s+(?:\w+\.)?\*',SCRIPT.read_text(),re.I)
     db=make_db();db.execute(execution_sql())
-    assert rows(db,f'select count(*) from {FINAL}')==[(0,)]
+    assert rows(db,f'select count(*) from {DETAIL}')==[(0,)]
     assert rows(db,f'select sum(error_count) from {S}.prt_qas_checks')==[(0,)]
     db=make_db()
     add_history(db,'CUSTOM_KN','CUSTOM_CODE','PASSED')
@@ -376,6 +384,120 @@ def check_macros_and_empty():
     print('PASS: macro names/codes/lists, no lookup tables or SELECT *, empty inputs and 0/1 TAS flags.')
 
 
+def check_rk_and_target_contract():
+    db=make_db();populate(db)
+    db.execute('''insert into dm_pik_fd_cdmr.tech_questionnaire_x_customer values
+        ('Q1',1001,'2999-12-31'),('Q1',1001,'2999-12-31'),('Q1',9001,'2025-01-16'),
+        ('Q4',1004,'2999-12-31'),('Q4',1005,'2999-12-31'),('Q4',1004,'2999-12-31'),
+        ('AUTO_MISSING',1602,'2999-12-31'),('AUTO1',1601,'2999-12-31'),
+        ('BAD_PARENT',-1,'2999-12-31'),('CC1',NULL,'2999-12-31'),
+        ('SHARED_RK_OLD',1700,'2999-12-31'),('SHARED_RK_NEW',1700,'2999-12-31')''')
+    add_raw(db,'AUTO_RK_LINKED','AutoLoan','VERIFICATION')
+    add_tas(db,661,'AUTO_RK_LINKED','ALPP')
+    db.execute("insert into dm_pik_fd_cdmr.tech_questionnaire_x_customer values ('AUTO_RK_LINKED',1661,'2999-12-31')")
+    add_raw(db,'SHARED_RK_OLD','KN','0','OLD_RK_NUMBER')
+    add_raw(db,'SHARED_RK_NEW','KN','SCORING','NEW_RK_NUMBER',questionnaire_dt='2025-01-02 00:00:00')
+    db.execute(execution_sql())
+    assert rows(db,f'select check_name from {S}.prt_qas_checks where error_count<>0')==[]
+    assert rows(db,f"select questionnaire_rk,rk_mapping_count,history_row_count from {S}.prt_qas_questionnaire where questionnaire_id='Q1'")==[(1001,1,2)]
+    assert rows(db,f"select questionnaire_rk,rk_mapping_count from {S}.prt_qas_questionnaire where questionnaire_id='Q4' order by questionnaire_rk")==[(1004,2),(1005,2)]
+    assert rows(db,f"select count(*) from {S}.prt_tqs_questionnaire_rk where questionnaire_rk in (-1,9001)")==[(0,)]
+    assert rows(db,f'''select questionnaire_id,questionnaire_rk,verification_flg,history_row_count
+                       from {S}.prt_qas_questionnaire where questionnaire_rk=1700''')==[('SHARED_RK_NEW',1700,True,2)]
+    assert set(rows(db,f'''select n.application_num from {S}.prt_qas_questionnaire q,
+                           unnest(q.application_nums) n(application_num) where q.questionnaire_rk=1700'''))=={
+        ('OLD_RK_NUMBER',),('NEW_RK_NUMBER',)}
+    expected_names=['questionnaire_rk','questionnaire_dttm','quest_verification_flg',
+        'parent_application_rk','parent_application_dt','parent_open_flg','parent_prescoring_flg',
+        'parent_at_work_flg','parent_approved_flg','application_rk','application_dt','deal_issue_date',
+        'create_flg','at_work_flg','final_approved_flg','agr_signed_flg',
+        'level25_product_bp_nm','level35_product_bp_nm','processed_dttm']
+    target_schema=rows(db,f'describe {FINAL}')
+    assert [r[0] for r in target_schema]==expected_names
+    assert [r[1] for r in target_schema]==['BIGINT','TIMESTAMP','BOOLEAN','BIGINT','DATE',
+        'BOOLEAN','BOOLEAN','BOOLEAN','BOOLEAN','BIGINT','DATE','DATE','BOOLEAN','BOOLEAN',
+        'BOOLEAN','BOOLEAN','VARCHAR','VARCHAR','TIMESTAMP_S']
+    assert rows(db,f'select {", ".join(expected_names)} from {FINAL} where questionnaire_rk=1001 and application_rk=201')==[
+        (1001,datetime(2025,1,1),True,901,date(2025,1,1),True,True,True,True,
+         201,date(2025,2,1),None,True,False,False,False,'TEST','TEST',datetime(2026,10,15,12))]
+    assert rows(db,f'''select level25_product_bp_nm,level35_product_bp_nm,quest_verification_flg
+                       from {FINAL} where questionnaire_rk=1602''')==[('Автокредит',None,False)]
+    assert rows(db,f'''select questionnaire_rk,application_rk,quest_verification_flg
+                       from {FINAL} where questionnaire_rk=1661''')==[(1661,661,True)]
+    assert rows(db,f'select count(*) from {FINAL}')==rows(db,f'select count(*) from {DETAIL}')
+    assert rows(db,f'''select count(*) from {DETAIL} where record_type='QUESTIONNAIRE_ONLY'
+                       and q_questionnaire_id='Q3' and q_questionnaire_rk is null''')==[(1,)]
+    # The reconstructed history includes every original technical TQS attribute.
+    tqs_fields={'questionnaire_id','questionnaire_rk','questionnaire_dttm','utmcn_info',
+        'utmcmd_info','utmcsr_info','utmctr_info','utmcct_info','status_cd','scoring_status_nm',
+        'prescoring_status_nm','product_type_cd','status_name','program_type','src_cd',
+        'level25_product_bp_nm','effective_from_dttm','effective_to_dttm','processed_dttm'}
+    assert tqs_fields|{'application_num'} <= {r[0] for r in rows(db,f'describe {S}.prt_qas_tech_questionnaire_status')}
+    print('PASS: real RK mapping, duplicate customer pairs, multiple RK, unmapped preservation and shared-RK history.')
+    print('PASS: all 19 target fields, exact types/values, all original TQS attributes and projection row preservation.')
+
+
+def check_original_branch_routing():
+    db=make_db()
+    add_raw(db,'PREFIX_KN','UNLISTED',src_cd_src='1376_TEST')
+    add_raw(db,'PREFIX_KK_LONG','UNLISTED',src_cd_src='1383_TEST')
+    add_raw(db,'PREFIX_AUTO','UNLISTED',src_cd_src='1388_TEST')
+    add_raw(db,'CODE_ONLY','KN',src_cd_src='UNRELATED')
+    add_raw(db,'KN_EXCLUDED','KN',src_cd_src='1383_TEST')
+    add_raw(db,'KN_NULL_SOURCE','KN',src_cd_src=None)
+    add_raw(db,'RAW_SOURCE_IGNORED','UNLISTED',src_cd='1388_TEST',src_cd_src='UNRELATED')
+    db.execute(execution_sql())
+    assert rows(db,f'''select questionnaire_id,level25_product_bp_nm from {S}.prt_qas_questionnaire
+                       order by questionnaire_id''')==[
+        ('CODE_ONLY','Потребкредит'),('KN_EXCLUDED','Кредитные карты'),('PREFIX_AUTO','Автокредит'),
+        ('PREFIX_KK_LONG','Кредитные карты'),('PREFIX_KN','Потребкредит')]
+    assert rows(db,f'''select raw_src_cd,src_cd from {S}.prt_qas_tech_questionnaire_status
+                       where questionnaire_id='PREFIX_AUTO' ''')==[('SHARED_SOURCE','1388_TEST')]
+    print('PASS: original source-or-code branch routing, KN exclusion, NULL semantics and canonical src_cd.')
+
+
+def check_original_status_timeline():
+    db=make_db()
+    # Source observation order is deliberately different from business status priority.
+    for status in ['APPROVED','DRAFT','DEAL_VER','APPROVE_RKK']:
+        add_raw(db,'TIMELINE_AUTO','AutoLoan',status,app_num='NUM_'+status,
+                createtime_dttm='2025-01-01 00:00:00',processed_dttm='2025-01-01 00:00:00')
+    db.execute("insert into dm_pik_fd_cdmr.tech_questionnaire_x_customer values ('TIMELINE_AUTO',2001,'2999-12-31')")
+    for status in ['SCORING','0','10.0','одобрено','CLIENT_DECLINE']:
+        add_raw(db,'TIMELINE_KN','KN',status,app_num='NUM_'+status)
+    db.execute(execution_sql())
+    assert rows(db,f'''select status_cd,status_priority,cast(effective_from_dttm as text),
+                              cast(effective_to_dttm as text)
+                       from {S}.prt_qas_tech_questionnaire_status where questionnaire_rk=2001
+                       order by effective_from_dttm''')==[
+        ('DEAL_VER',5,'2025-01-01 00:00:00','2025-01-01 00:00:01'),
+        ('APPROVE_RKK',10,'2025-01-01 00:00:01','2025-01-01 00:00:02'),
+        ('DRAFT',47,'2025-01-01 00:00:02','2025-01-01 00:00:03'),
+        ('APPROVED',147,'2025-01-01 00:00:03','2999-12-31 00:00:00')]
+    assert rows(db,f'''select status_cd,status_priority from {S}.prt_tqs_kn_questionnaire
+                       where questionnaire_id='TIMELINE_KN' order by status_priority''')==[
+        ('одобрено',15),('10.0',18),('0',23),('SCORING',30),('CLIENT_DECLINE',47)]
+    assert rows(db,f'''select status_cd,verification_flg,history_row_count from {S}.prt_qas_questionnaire
+                       where questionnaire_rk=2001''')==[('APPROVED',True,4)]
+    db.execute(execution_sql({'p_report_timestamp':"'2025-01-01 00:00:01'"}))
+    assert rows(db,f'''select status_cd,verification_flg from {S}.prt_qas_questionnaire
+                       where questionnaire_rk=2001''')==[('APPROVE_RKK',True)]
+    print('PASS: original KN/auto priorities, second offsets, LEAD end dates and current version selection.')
+
+
+def check_attribute_catalog():
+    catalog=(ROOT/'docs/attributes_catalog.txt').read_text()
+    db=make_db();db.execute(execution_sql())
+    tables=re.findall(r'^create table &db_sbx\.(\w+)$',SCRIPT.read_text(),re.M)
+    documented={}
+    for name,body in re.findall(r'^TABLE &db_sbx\.(\w+)\n(.*?)(?=^TABLE |\Z)',catalog,re.M|re.S):
+        documented[name]=re.findall(r'^  \d+\. (\w+) \|',body,re.M)
+    assert set(documented)==set(tables)
+    for name in tables:
+        assert documented[name]==[c[0] for c in rows(db,f'describe {S}.{name}')],name
+    print(f'PASS: TXT catalog lists every output attribute, in order, for all {len(tables)} created tables.')
+
+
 if __name__=='__main__':
     print('PARSED PostgreSQL statements:',len(parse_sql(postgres_sql())))
     check_pipeline()
@@ -384,4 +506,8 @@ if __name__=='__main__':
     check_original_priorities()
     check_original_date_chain()
     check_macros_and_empty()
+    check_rk_and_target_contract()
+    check_original_branch_routing()
+    check_original_status_timeline()
+    check_attribute_catalog()
     print('Offline synthetic tests only; bank data and Greenplum execution remain unverified.')

@@ -1,0 +1,1379 @@
+КАТАЛОГ АТРИБУТОВ И ПРОИСХОЖДЕНИЕ ЦЕЛЕВОЙ ВИТРИНЫ
+SQL: sql/build_questionnaire_application_status.sql
+
+Границы достоверности
+--------------------
+Изучены все присланные скриншоты tech_questionnaire_status, включая ветки,
+приоритеты, сдвиг времени, UNION и финальный JOIN для RK. Отдельного исходного
+файла tech_questionnaire_rk в репозитории нет. Алгоритм генерации RK выше по
+потоку не показан: этот прототип использует уже созданные RK из связи с клиентом.
+Восстановлена кредитная часть для КН/КК/авто. ДК, депозиты и текущие счета — вне
+согласованного объёма итоговой витрины; их продуктовые макросписки не скопированы.
+
+Полные списки промежуточных атрибутов ниже соответствуют текущему SQL; состав
+проверен исполнением на пустой синтетической БД. Типы приведены к PostgreSQL
+по выражениям и известным типам источников, не получены из банковской БД.
+RAW: все 62 атрибута из предоставленного списка; BDM: 66 видимых атрибутов
+(3 длинных имени на скриншоте обрезаны и явно помечены многоточием).
+TAS: все 22 атрибута показанного DDL. Связь анкета–клиент: показаны только 3
+необходимых атрибута; полный состав этой таблицы НЕ предоставлен.
+
+В каждой секции TABLE указаны ВСЕ выходные атрибуты соответствующего шага,
+их типы и выражения первого SELECT. При UNION атрибуты выровнены по порядку;
+для второго плеча см. SQL. Алиасы раскрываются через список "Читает" и SQL.
+Расчётные поля и служебные номера обозначены выражениями, не выданы за RK.
+
+1. КАК В RAW ПОЯВЛЯЕТСЯ ПРОДУКТ
+-----------------------------
+В RAW level25_product_bp_nm отсутствует. После очистки prt_tqs_questionnaire:
+  КК: (src_cd_src LIKE &p_quest_src_cd_kk_list OR product_type_code IN
+       (&p_quest_product_kk_list)) AND length(questionnaire_id) NOT IN
+       (&p_quest_not_len_id_kk_list). Ветке присваивается &p_prod_kk_name.
+  КН: (src_cd_src LIKE &p_quest_src_cd_kn_list OR product_type_code IN
+       (&p_quest_product_kn_list)) AND src_cd_src NOT LIKE
+       &p_quest_src_cd_kk_list. Ветке присваивается &p_prod_kn_name.
+  Авто: src_cd_src LIKE &p_quest_src_cd_ak_list OR product_type_code IN
+       (&p_quest_product_ak_list). Ветке присваивается &p_prod_auto_name.
+Это константа ветки, а не JOIN со справочником и не однозначное соответствие
+источника продукту. Сохранены оба плеча OR, исключение КК из КН и SQL-семантика
+NULL: KN с NULL src_cd_src не проходит NOT LIKE. Если ветки пересекаются,
+исходный UNION ALL сохраняет обе строки; маршрутизация видна в отчёте 4.11.
+Далее q.src_cd не фильтруется, продукт проверяется по level25_product_bp_nm.
+В оригинальном TQS src_cd = RAW.src_cd_src; RAW.src_cd сохранён как raw_src_cd.
+
+2. СОПОСТАВЛЕНИЕ ВСЕХ 19 ЦЕЛЕВЫХ АТРИБУТОВ
+------------------------------------------
+Финал: &db_sbx.prt_tech_internet_funnel (проекция без DISTINCT, строки не теряются).
+Подробный результат: &db_sbx.prt_qas_funnel_detail.
+Номера application_num/application_nums остаются в TQS/ветках/detail, как и
+UTM, ID, статусы, источники, интервалы, способы связей и признаки конфликтов.
+
+01. questionnaire_rk | bigint
+    tech_questionnaire_x_customer.questionnaire_rk -> prt_tqs_questionnaire_rk -> TQS -> detail.q_questionnaire_rk. Актуальные distinct пары ID/RK; NULL при отсутствии соответствия. Не row_number.
+02. questionnaire_dttm | timestamp
+    MIN первого непустого questionnaire_dt/business_dt/createtime_dttm по questionnaire_id ДО удаления дублей; далее TQS -> detail.q_questionnaire_dttm.
+03. quest_verification_flg | boolean
+    MAX наличия любого макростатуса в истории RK + level25; без RK — ID + level25. Расчёт до текущего среза, из detail.verification_flg. NULL для отсутствующей анкеты/неизвестного ID.
+04. parent_application_rk | bigint
+    TAS.parent_application_rk -> detail.tas_parent_application_rk. -1 нормализуется в NULL.
+05. parent_application_dt | date
+    TAS.parent_application_dt -> detail.tas_parent_application_dt.
+06. parent_open_flg | boolean
+    TAS.parent_open_flg -> detail.tas_parent_open_flg.
+07. parent_prescoring_flg | boolean
+    TAS.parent_prescoring_flg -> detail.tas_parent_prescoring_flg.
+08. parent_at_work_flg | boolean
+    TAS.parent_at_work_flg -> detail.tas_parent_at_work_flg.
+09. parent_approved_flg | boolean
+    TAS.parent_approved_flg -> detail.tas_parent_approved_flg.
+10. application_rk | bigint
+    TAS.application_rk -> detail.tas_application_rk. BDM.application_rk служит ключом соединения; он не подменяет отсутствие TAS. -1 -> NULL.
+11. application_dt | date
+    TAS.application_dt -> detail.tas_application_dt. Не заменяется датой анкеты/BDM.
+12. deal_issue_date | date
+    TAS.deal_issue_date -> detail.tas_deal_issue_date.
+13. create_flg | boolean
+    TAS.create_flg -> detail.tas_create_flg.
+14. at_work_flg | boolean
+    TAS.at_work_flg -> detail.tas_at_work_flg.
+15. final_approved_flg | boolean
+    TAS.final_approved_flg -> detail.tas_final_approved_flg.
+16. agr_signed_flg | boolean
+    TAS.agr_signed_flg -> detail.tas_agr_signed_flg.
+17. level25_product_bp_nm | text
+    COALESCE(TAS.level25_product_bp_nm, TQS.level25_product_bp_nm). При несовпадении приоритет TAS, оба исходных значения сохранены в detail; конфликт показывает отчёт 4.15.
+18. level35_product_bp_nm | text
+    TAS.level35_product_bp_nm. В RAW/TQS его нет. Для анкеты без TAS — NULL до предоставления правила/справочника уровня 35.
+19. processed_dttm | timestamp(0)
+    CAST(&p_report_timestamp AS timestamp(0)): момент текущей загрузки, один на запуск; не максимум времён источников.
+
+Флаги заявок — поля TAS, уже прошедшие её собственный ETL. Здесь они не
+пересчитываются из bdm.application_status. При нескольких разных непустых
+значениях TAS на одном ключе спорное поле = NULL, исходные строки и счётчики
+конфликтов сохраняются в адаптерах. NULL второй стороны соединения не заменяем
+false/1900/-1. processed_dttm финала относится к этому прототипу.
+
+Гранулярность результата — найденное соответствие текущей анкеты и сущности
+TAS либо несвязанная сторона. N:M сохранены, один RK может быть в нескольких
+строках. Пометки RK в перечне полей не являются доказательством уникальности
+отдельного поля или ограничением PRIMARY KEY: у несвязанных сторон ключи NULL.
+
+3. ВНЕШНИЕ ИСТОЧНИКИ: ПОЛНЫЙ ИЗВЕСТНЫЙ СОСТАВ
+-----------------------------------------------
+
+SOURCE &p_db_rawd.v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention
+62 атрибута по скриншотам information_schema, строки 67–128. В шаг 1.1 выбираются 35 необходимых полей, включая поля приоритетов. Остальные не требуются 19-полевому итогу и не выданы за отсутствующие.
+  001. age | integer | в показанном источнике; не нужен текущей логике
+  002. application_num | text | используется
+  003. avto_marketplace_flg | smallint | в показанном источнике; не нужен текущей логике
+  004. birth_dt | text | в показанном источнике; не нужен текущей логике
+  005. business_dt | text | используется
+  006. calculator_loan_rate | numeric | в показанном источнике; не нужен текущей логике
+  007. channel | text | в показанном источнике; не нужен текущей логике
+  008. client_city | text | в показанном источнике; не нужен текущей логике
+  009. client_credit_region | text | в показанном источнике; не нужен текущей логике
+  010. client_gender | text | в показанном источнике; не нужен текущей логике
+  011. client_region | text | в показанном источнике; не нужен текущей логике
+  012. client_type | text | используется
+  013. company_legal_form | text | в показанном источнике; не нужен текущей логике
+  014. company_nm | text | используется
+  015. company_sphere_of_activity | text | в показанном источнике; не нужен текущей логике
+  016. create_dm_dt | text | в показанном источнике; не нужен текущей логике
+  017. createtime_dttm | text | используется
+  018. credit_amt | numeric | используется
+  019. credit_period | text | в показанном источнике; не нужен текущей логике
+  020. date_time | text | в показанном источнике; не нужен текущей логике
+  021. doc_num | text | в показанном источнике; не нужен текущей логике
+  022. doc_series | text | в показанном источнике; не нужен текущей логике
+  023. email | text | используется
+  024. first_nm | text | используется
+  025. globalclient_id | text | используется
+  026. gosuslugi_flg | smallint | в показанном источнике; не нужен текущей логике
+  027. is_mobile_device_flg | smallint | в показанном источнике; не нужен текущей логике
+  028. last_nm | text | используется
+  029. mark_offer_show_flg | smallint | в показанном источнике; не нужен текущей логике
+  030. mark_offer_use_flg | smallint | в показанном источнике; не нужен текущей логике
+  031. max_month_pay_amt | numeric | в показанном источнике; не нужен текущей логике
+  032. middle_nm | text | используется
+  033. payment_system_type | text | в показанном источнике; не нужен текущей логике
+  034. person_id | text | используется
+  035. phone_num | text | используется
+  036. prescoring_dt | text | используется
+  037. prescoring_status_nm | text | используется
+  038. processed_dttm | text | используется
+  039. product_type_code | text | используется
+  040. program_type | text | используется
+  041. questionnaire_dt | text | используется
+  042. questionnaire_id | text | используется
+  043. realty_acquiring_region | text | в показанном источнике; не нужен текущей логике
+  044. salary_card_flg | smallint | используется
+  045. scoring_dt | text | используется
+  046. scoring_status_info | text | в показанном источнике; не нужен текущей логике
+  047. scoring_status_nm | text | используется
+  048. sessionintention_id | text | используется
+  049. spec_program | text | используется
+  050. src_cd | text | используется
+  051. src_cd_src | text | используется
+  052. status | text | используется
+  053. tax_payer_num | text | используется
+  054. useragent | text | в показанном источнике; не нужен текущей логике
+  055. utmcn | text | используется
+  056. utmcct | text | используется
+  057. utmcmd | text | используется
+  058. utmcsr | text | используется
+  059. utmctr | text | используется
+  060. utmga | text | в показанном источнике; не нужен текущей логике
+  061. valid_flg | boolean | в показанном источнике; не нужен текущей логике
+  062. zero_visits_flg | smallint | используется
+
+SOURCE &p_db_bdm.application
+66 атрибутов по скриншотам строк 1–66. Многоточие — реально обрезанное имя на изображении; эти 3 поля не читаются скриптом. Уточнить точное написание во вкладке Columns/DDL; имена не додуманы.
+  001. application_add_id_txt | text | в показанном источнике; не нужен текущей логике
+  002. application_advertising_cd | text | в показанном источнике; не нужен текущей логике
+  003. application_begin_date | date | используется
+  004. application_create_type_cd | text | в показанном источнике; не нужен текущей логике
+  005. application_credit_class_cd | text | в показанном источнике; не нужен текущей логике
+  006. application_credit_form_cd | text | в показанном источнике; не нужен текущей логике
+  007. application_credit_type_cd | text | в показанном источнике; не нужен текущей логике
+  008. application_end_date | date | в показанном источнике; не нужен текущей логике
+  009. application_global_uid_id | text | в показанном источнике; не нужен текущей логике
+  010. application_id | text | в показанном источнике; не нужен текущей логике
+  011. application_marketing_cd | text | в показанном источнике; не нужен текущей логике
+  012. application_method_sign_c… | text | в показанном источнике; не нужен текущей логике
+  013. application_num | text | используется
+  014. application_receive_cash_su… | numeric | в показанном источнике; не нужен текущей логике
+  015. application_receive_total_su… | numeric | в показанном источнике; не нужен текущей логике
+  016. application_rejection_reason | text | в показанном источнике; не нужен текущей логике
+  017. application_request_rur_sum | numeric | в показанном источнике; не нужен текущей логике
+  018. application_request_sum | numeric | в показанном источнике; не нужен текущей логике
+  019. application_rk | bigint | используется
+  020. application_sale_method_cd | text | в показанном источнике; не нужен текущей логике
+  021. application_security_cat_cd | text | в показанном источнике; не нужен текущей логике
+  022. application_sign_date | date | в показанном источнике; не нужен текущей логике
+  023. application_type_cd | text | в показанном источнике; не нужен текущей логике
+  024. application_uid_id | text | в показанном источнике; не нужен текущей логике
+  025. bk_id | text | в показанном источнике; не нужен текущей логике
+  026. bk_src_cd | text | в показанном источнике; не нужен текущей логике
+  027. card_flg | boolean | в показанном источнике; не нужен текущей логике
+  028. client_other_company_code | text | в показанном источнике; не нужен текущей логике
+  029. client_other_company_desc | text | в показанном источнике; не нужен текущей логике
+  030. counterparty_rk | bigint | в показанном источнике; не нужен текущей логике
+  031. currency_rk | smallint | в показанном источнике; не нужен текущей логике
+  032. department_rk | bigint | в показанном источнике; не нужен текущей логике
+  033. discount_payment_num | text | в показанном источнике; не нужен текущей логике
+  034. discount_payment_sum | numeric | в показанном источнике; не нужен текущей логике
+  035. distant_internal_flg | boolean | в показанном источнике; не нужен текущей логике
+  036. dko_num | text | в показанном источнике; не нужен текущей логике
+  037. edo_available_flg | boolean | в показанном источнике; не нужен текущей логике
+  038. effective_from_date | date | в показанном источнике; не нужен текущей логике
+  039. effective_to_date | date | используется
+  040. electro_signature_flg | boolean | в показанном источнике; не нужен текущей логике
+  041. employee_rk | bigint | в показанном источнике; не нужен текущей логике
+  042. financing_purpose_cd | text | в показанном источнике; не нужен текущей логике
+  043. holiday_flg | boolean | в показанном источнике; не нужен текущей логике
+  044. increase_limit_flg | boolean | в показанном источнике; не нужен текущей логике
+  045. insurance_rk | bigint | в показанном источнике; не нужен текущей логике
+  046. interest_rate | numeric | в показанном источнике; не нужен текущей логике
+  047. interest_sum | numeric | в показанном источнике; не нужен текущей логике
+  048. ip_address_name | text | в показанном источнике; не нужен текущей логике
+  049. mac_address_name | text | в показанном источнике; не нужен текущей логике
+  050. max_limit_sum | numeric | в показанном источнике; не нужен текущей логике
+  051. monthly_payment_sum | numeric | в показанном источнике; не нужен текущей логике
+  052. overdue_interest_rate | numeric | в показанном источнике; не нужен текущей логике
+  053. payment_day_num | text | в показанном источнике; не нужен текущей логике
+  054. penalty_interest_rate | numeric | в показанном источнике; не нужен текущей логике
+  055. preapproved_flg | boolean | в показанном источнике; не нужен текущей логике
+  056. prepayment_sum | numeric | в показанном источнике; не нужен текущей логике
+  057. receive_credit_term_months | text | в показанном источнике; не нужен текущей логике
+  058. receive_product_rk | bigint | в показанном источнике; не нужен текущей логике
+  059. region_cd | text | в показанном источнике; не нужен текущей логике
+  060. request_credit_term_months | text | в показанном источнике; не нужен текущей логике
+  061. request_interest_rate | numeric | в показанном источнике; не нужен текущей логике
+  062. request_product_rk | bigint | в показанном источнике; не нужен текущей логике
+  063. sales_channel_cd | text | в показанном источнике; не нужен текущей логике
+  064. service_package_cd | text | в показанном источнике; не нужен текущей логике
+  065. src_cd | text | используется
+  066. synth_code | text | в показанном источнике; не нужен текущей логике
+
+SOURCE &db_sbx.tech_application_status
+Все 22 поля предоставленного DDL. processed_dttm — timestamp(0) по исходному DDL; в адаптере сохраняется точность фактического источника. Boolean-атрибуты приводятся явно. Контракт актуального снимка требует подтверждения.
+  001. parent_application_rk | bigint | используется
+  002. parent_src_cd | text | используется
+  003. application_rk | bigint | используется
+  004. src_cd | text | используется
+  005. parent_application_id | text | используется
+  006. parent_application_dt | date | используется
+  007. parent_approved_dttm | timestamp | используется
+  008. application_id | text | используется
+  009. application_dt | date | используется
+  010. application_type_cd | text | используется
+  011. deal_issue_date | date | используется
+  012. level25_product_bp_nm | text | используется
+  013. level35_product_bp_nm | text | используется
+  014. parent_open_flg | boolean | используется
+  015. parent_prescoring_flg | boolean | используется
+  016. parent_at_work_flg | boolean | используется
+  017. parent_approved_flg | boolean | используется
+  018. create_flg | boolean | используется
+  019. at_work_flg | boolean | используется
+  020. final_approved_flg | boolean | используется
+  021. agr_signed_flg | boolean | используется
+  022. processed_dttm | timestamp(0) | используется
+
+SOURCE &p_db_cdmr.tech_questionnaire_x_customer
+Из показанного JOIN известны только эти 3 используемых атрибута. Список всех полей и точный тип effective_to_dttm получить из Columns/DDL. Эта таблица содержит ранее присвоенный RK, а не генерирует его в данном скрипте.
+  001. questionnaire_id | text | используется
+  002. questionnaire_rk | bigint | используется
+  003. effective_to_dttm | timestamp | используется
+
+REFERENCE tech_questionnaire_status (показанный исходный контракт, не внешний источник этого прототипа)
+  001. questionnaire_id | text | сохранён в prt_qas_tech_questionnaire_status
+  002. questionnaire_rk | bigint | сохранён в prt_qas_tech_questionnaire_status
+  003. questionnaire_dttm | timestamp | сохранён в prt_qas_tech_questionnaire_status
+  004. utmcn_info | text | сохранён в prt_qas_tech_questionnaire_status
+  005. utmcmd_info | text | сохранён в prt_qas_tech_questionnaire_status
+  006. utmcsr_info | text | сохранён в prt_qas_tech_questionnaire_status
+  007. utmctr_info | text | сохранён в prt_qas_tech_questionnaire_status
+  008. utmcct_info | text | сохранён в prt_qas_tech_questionnaire_status
+  009. status_cd | text | сохранён в prt_qas_tech_questionnaire_status
+  010. scoring_status_nm | text | сохранён в prt_qas_tech_questionnaire_status
+  011. prescoring_status_nm | text | сохранён в prt_qas_tech_questionnaire_status
+  012. product_type_cd | text | сохранён в prt_qas_tech_questionnaire_status
+  013. status_name | text | сохранён в prt_qas_tech_questionnaire_status
+  014. program_type | text | сохранён в prt_qas_tech_questionnaire_status
+  015. src_cd | text | сохранён в prt_qas_tech_questionnaire_status
+  016. level25_product_bp_nm | text | сохранён в prt_qas_tech_questionnaire_status
+  017. effective_from_dttm | timestamp | сохранён в prt_qas_tech_questionnaire_status
+  018. effective_to_dttm | timestamp | сохранён в prt_qas_tech_questionnaire_status
+  019. processed_dttm | timestamp | сохранён в prt_qas_tech_questionnaire_status
+
+4. ВСЕ ТАБЛИЦЫ, СОЗДАВАЕМЫЕ ТЕКУЩИМ ПРОТОТИПОМ
+------------------------------------------------
+
+TABLE &db_sbx.prt_tqs_questionnaire_raw
+Шаг 1.1. Новый источник: явно выбираем атрибуты для очистки, приоритетов и витрины.
+Читает: rd_raw_orb.v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention
+  001. source_row_id | bigint | row_number() OVER (ORDER BY r.questionnaire_id, r.status, r.createtime_dttm, r.sessionintention_id)
+  002. questionnaire_id | text | r.questionnaire_id
+  003. application_num | text | r.application_num
+  004. utmcn | text | r.utmcn
+  005. utmcmd | text | r.utmcmd
+  006. utmcsr | text | r.utmcsr
+  007. utmctr | text | r.utmctr
+  008. utmcct | text | r.utmcct
+  009. status | text | r.status
+  010. scoring_status_nm | text | r.scoring_status_nm
+  011. prescoring_status_nm | text | r.prescoring_status_nm
+  012. product_type_code | text | r.product_type_code
+  013. program_type | text | r.program_type
+  014. src_cd | text | r.src_cd
+  015. src_cd_src | text | r.src_cd_src
+  016. questionnaire_dt | text | r.questionnaire_dt
+  017. business_dt | text | r.business_dt
+  018. createtime_dttm | text | r.createtime_dttm
+  019. prescoring_dt | text | r.prescoring_dt
+  020. scoring_dt | text | r.scoring_dt
+  021. processed_dttm | text | r.processed_dttm
+  022. sessionintention_id | text | r.sessionintention_id
+  023. globalclient_id | text | r.globalclient_id
+  024. person_id | text | r.person_id
+  025. last_nm | text | r.last_nm
+  026. first_nm | text | r.first_nm
+  027. middle_nm | text | r.middle_nm
+  028. tax_payer_num | text | r.tax_payer_num
+  029. email | text | r.email
+  030. client_type | text | r.client_type
+  031. company_nm | text | r.company_nm
+  032. phone_num | text | r.phone_num
+  033. credit_amt | numeric | r.credit_amt
+  034. zero_visits_flg | smallint | r.zero_visits_flg
+  035. spec_program | text | r.spec_program
+  036. salary_card_flg | smallint | r.salary_card_flg
+
+TABLE &db_sbx.prt_tqs_questionnaire_parsed
+Шаг 1.2. Безопасный CAST текстовых дат; порядок первого COALESCE не меняем.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_raw
+  001. source_row_id | bigint | p.source_row_id
+  002. questionnaire_id | text | p.questionnaire_id
+  003. application_num | text | p.application_num
+  004. utmcn | text | p.utmcn
+  005. utmcmd | text | p.utmcmd
+  006. utmcsr | text | p.utmcsr
+  007. utmctr | text | p.utmctr
+  008. utmcct | text | p.utmcct
+  009. status | text | p.status
+  010. scoring_status_nm | text | p.scoring_status_nm
+  011. prescoring_status_nm | text | p.prescoring_status_nm
+  012. product_type_code | text | p.product_type_code
+  013. program_type | text | p.program_type
+  014. src_cd | text | p.src_cd
+  015. src_cd_src | text | p.src_cd_src
+  016. questionnaire_dt | text | p.questionnaire_dt
+  017. business_dt | text | p.business_dt
+  018. createtime_dttm | text | p.createtime_dttm
+  019. prescoring_dt | text | p.prescoring_dt
+  020. scoring_dt | text | p.scoring_dt
+  021. processed_dttm | text | p.processed_dttm
+  022. sessionintention_id | text | p.sessionintention_id
+  023. globalclient_id | text | p.globalclient_id
+  024. person_id | text | p.person_id
+  025. last_nm | text | p.last_nm
+  026. first_nm | text | p.first_nm
+  027. middle_nm | text | p.middle_nm
+  028. tax_payer_num | text | p.tax_payer_num
+  029. email | text | p.email
+  030. client_type | text | p.client_type
+  031. company_nm | text | p.company_nm
+  032. phone_num | text | p.phone_num
+  033. credit_amt | numeric | p.credit_amt
+  034. zero_visits_flg | smallint | p.zero_visits_flg
+  035. spec_program | text | p.spec_program
+  036. salary_card_flg | smallint | p.salary_card_flg
+  037. parsed_questionnaire_dt | timestamp | p.parsed_questionnaire_dt
+  038. parsed_business_dt | timestamp | p.parsed_business_dt
+  039. parsed_createtime_dttm | timestamp | p.parsed_createtime_dttm
+  040. parsed_prescoring_dt | timestamp | p.parsed_prescoring_dt
+  041. parsed_scoring_dt | timestamp | p.parsed_scoring_dt
+  042. parsed_processed_dttm | timestamp | p.parsed_processed_dttm
+  043. first_source_dttm | timestamp | CASE WHEN p.questionnaire_dt IS NOT NULL THEN p.parsed_questionnaire_dt WHEN p.business_dt IS NOT NULL THEN p.parsed_business_dt ELSE p.parsed_createtime_dttm END
+
+TABLE &db_sbx.prt_tqs_questionnaire_checked
+Шаг 1.3. Причины отбраковки: тестовые ФИО, маски дат, календарь, период и будущее.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_parsed
+  001. source_row_id | bigint | p.source_row_id
+  002. questionnaire_id | text | p.questionnaire_id
+  003. application_num | text | p.application_num
+  004. utmcn | text | p.utmcn
+  005. utmcmd | text | p.utmcmd
+  006. utmcsr | text | p.utmcsr
+  007. utmctr | text | p.utmctr
+  008. utmcct | text | p.utmcct
+  009. status | text | p.status
+  010. scoring_status_nm | text | p.scoring_status_nm
+  011. prescoring_status_nm | text | p.prescoring_status_nm
+  012. product_type_code | text | p.product_type_code
+  013. program_type | text | p.program_type
+  014. src_cd | text | p.src_cd
+  015. src_cd_src | text | p.src_cd_src
+  016. questionnaire_dt | text | p.questionnaire_dt
+  017. business_dt | text | p.business_dt
+  018. createtime_dttm | text | p.createtime_dttm
+  019. prescoring_dt | text | p.prescoring_dt
+  020. scoring_dt | text | p.scoring_dt
+  021. processed_dttm | text | p.processed_dttm
+  022. sessionintention_id | text | p.sessionintention_id
+  023. globalclient_id | text | p.globalclient_id
+  024. person_id | text | p.person_id
+  025. last_nm | text | p.last_nm
+  026. first_nm | text | p.first_nm
+  027. middle_nm | text | p.middle_nm
+  028. tax_payer_num | text | p.tax_payer_num
+  029. email | text | p.email
+  030. client_type | text | p.client_type
+  031. company_nm | text | p.company_nm
+  032. phone_num | text | p.phone_num
+  033. credit_amt | numeric | p.credit_amt
+  034. zero_visits_flg | smallint | p.zero_visits_flg
+  035. spec_program | text | p.spec_program
+  036. salary_card_flg | smallint | p.salary_card_flg
+  037. parsed_questionnaire_dt | timestamp | p.parsed_questionnaire_dt
+  038. parsed_business_dt | timestamp | p.parsed_business_dt
+  039. parsed_createtime_dttm | timestamp | p.parsed_createtime_dttm
+  040. parsed_prescoring_dt | timestamp | p.parsed_prescoring_dt
+  041. parsed_scoring_dt | timestamp | p.parsed_scoring_dt
+  042. parsed_processed_dttm | timestamp | p.parsed_processed_dttm
+  043. first_source_dttm | timestamp | p.first_source_dttm
+  044. invalid_date_field_count | integer | CASE WHEN p.questionnaire_dt IS NOT NULL AND p.parsed_questionnaire_dt IS NULL THEN 1 ELSE 0 END + CASE WHEN p.business_dt IS NOT NULL AND p.parsed_business_dt IS NULL THEN 1 ELSE 0 END + CASE WHEN p.createtime_dttm IS NOT NULL AND p.parsed_createtime_dttm IS NULL THEN 1 ELSE 0 END + CASE WHEN p.prescoring_dt IS NOT NULL AND p.parsed_prescoring_dt IS NULL THEN 1 ELSE 0 END + CASE WHEN p.scoring_dt IS NOT NULL AND p.parsed_scoring_dt IS NULL THEN 1 ELSE 0 END + CASE WHEN p.processed_dttm IS NOT NULL AND p.parsed_processed_dttm IS NULL THEN 1 ELSE 0 END
+  045. source_filter_reason | text | CASE WHEN EXISTS (SELECT 1 FROM unnest(ARRAY['%ТЕСТ%', '%ТКЕСТ%', '%ТКЕКСТ%', '%ТЕМСТ%', '%ЛИПОВЫЙ%', '%ЗАЯВК%', 'ПЕНСИОНН%', 'МУЛЬТИКАРТ%', 'АРХАНГЕЛЬСК%', 'ЗВОНИТЬ%', 'AAA%']) AS t (pattern) WHERE COALESCE(upper(p.first_nm), '#') LIKE t.pattern) THEN 'TEST_FIRST_NAME_PATTERN' WHEN COALESCE(upper(p.first_nm), '#') IN ('ПЕНСЫ', 'ЛИД', 'НОВОКУЗНЕЦК', 'ТЕСТ', 'ЛЕХА', 'ДЯДЯ', 'ПРОЛД', 'АРОПР', 'ООО') THEN 'TEST_FIRST_NAME' WHEN COALESCE(upper(p.last_nm), '#') IN ('ТЕСТ') THEN 'TEST_LAST_NAME' WHEN COALESCE(upper(p.middle_nm), '#') LIKE 'ТЕСТОВНА' THEN 'TEST_MIDDLE_NAME' WHEN position('%' IN COALESCE(p.questionnaire_dt, p.business_dt, p.createtime_dttm)) > 0 THEN 'MASKED_PRIMARY_DATE' WHEN p.first_source_dttm IS NULL THEN 'INVALID_PRIMARY_DATE' WHEN p.first_source_dttm < CAST('2024-10-01' AS timestamp) THEN 'BEFORE_RAW_BEGIN_DATE' WHEN COALESCE(p.parsed_createtime_dttm, p.parsed_processed_dttm, p.parsed_business_dt, p.parsed_questionnaire_dt) > CAST(&p_report_timestamp AS timestamp) THEN 'FUTURE_RECORD' ELSE 'OK' END
+
+TABLE &db_sbx.prt_tqs_questionnaire_ranked
+Шаг 1.4. Приоритеты прототипа: одна победившая строка на questionnaire_id/status.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_checked
+  001. source_row_id | bigint | r.source_row_id
+  002. questionnaire_id | text | r.questionnaire_id
+  003. application_num | text | r.application_num
+  004. utmcn | text | r.utmcn
+  005. utmcmd | text | r.utmcmd
+  006. utmcsr | text | r.utmcsr
+  007. utmctr | text | r.utmctr
+  008. utmcct | text | r.utmcct
+  009. status | text | r.status
+  010. scoring_status_nm | text | r.scoring_status_nm
+  011. prescoring_status_nm | text | r.prescoring_status_nm
+  012. product_type_code | text | r.product_type_code
+  013. program_type | text | r.program_type
+  014. src_cd | text | r.src_cd
+  015. src_cd_src | text | r.src_cd_src
+  016. questionnaire_dttm | timestamp | min(r.first_source_dttm) OVER (PARTITION BY r.questionnaire_id, CASE WHEN NULLIF(btrim(r.questionnaire_id), '') IS NULL THEN r.source_row_id ELSE NULL END)
+  017. original_effective_from_dttm_auto_kn | timestamp | date_trunc('seconds', COALESCE(r.parsed_questionnaire_dt, r.parsed_business_dt, r.parsed_createtime_dttm, r.parsed_prescoring_dt, r.parsed_scoring_dt, r.parsed_processed_dttm))
+  018. original_effective_from_dttm_kk_dk | timestamp | date_trunc('seconds', COALESCE(r.parsed_business_dt, r.parsed_processed_dttm, r.parsed_questionnaire_dt, r.parsed_createtime_dttm, r.parsed_prescoring_dt, r.parsed_scoring_dt))
+  019. status_observed_dttm | timestamp | COALESCE(r.parsed_createtime_dttm, r.parsed_processed_dttm, r.parsed_business_dt, r.parsed_questionnaire_dt)
+  020. source_status_rn | bigint | row_number() OVER (PARTITION BY r.questionnaire_id, r.status, CASE WHEN NULLIF(btrim(r.questionnaire_id), '') IS NULL THEN r.source_row_id ELSE NULL END ORDER BY COALESCE(r.parsed_createtime_dttm, CAST('1900-01-01 00:00:00' AS timestamp)) DESC, r.sessionintention_id ASC NULLS LAST, COALESCE(r.parsed_processed_dttm, CAST('1900-01-01 00:00:00' AS timestamp)) DESC, COALESCE(r.parsed_business_dt, CAST('1900-01-01 00:00:00' AS timestamp)) DESC, r.utmcn DESC NULLS FIRST, r.utmcct DESC NULLS FIRST, r.utmcmd DESC NULLS FIRST, COALESCE(r.globalclient_id, '#') DESC, COALESCE(r.person_id, '#') DESC, COALESCE(r.last_nm, r.first_nm, r.middle_nm, '#') DESC, COALESCE(r.tax_payer_num, '#') DESC, COALESCE(r.email, '#') DESC, COALESCE(r.client_type, '#') DESC, COALESCE(r.company_nm, '#') DESC, CAST(CASE WHEN r.phone_num NOT LIKE '%%%' THEN 1 ELSE 0 END AS integer) DESC, r.credit_amt DESC NULLS FIRST, r.zero_visits_flg DESC NULLS FIRST, r.product_type_code ASC NULLS LAST, COALESCE(r.parsed_questionnaire_dt, CAST('1900-01-01 00:00:00' AS timestamp)) DESC, r.program_type ASC NULLS LAST, COALESCE(r.parsed_scoring_dt, CAST('1900-01-01 00:00:00' AS timestamp)) DESC, COALESCE(r.parsed_prescoring_dt, CAST('1900-01-01 00:00:00' AS timestamp)) DESC, r.application_num DESC NULLS FIRST, COALESCE(r.scoring_status_nm, '#') DESC, COALESCE(r.prescoring_status_nm, '#') DESC, COALESCE(r.spec_program, '#') DESC, COALESCE(r.src_cd_src, '#') DESC, r.salary_card_flg DESC NULLS FIRST, r.phone_num ASC NULLS LAST)
+
+TABLE &db_sbx.prt_tqs_questionnaire
+Шаг 1.5. prt_tqs_questionnaire: очищенный результат первого шага; только нужные атрибуты.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_ranked
+  001. source_row_id | bigint | r.source_row_id
+  002. questionnaire_id | text | r.questionnaire_id
+  003. application_num | text | r.application_num
+  004. utmcn | text | r.utmcn
+  005. utmcmd | text | r.utmcmd
+  006. utmcsr | text | r.utmcsr
+  007. utmctr | text | r.utmctr
+  008. utmcct | text | r.utmcct
+  009. status | text | r.status
+  010. scoring_status_nm | text | r.scoring_status_nm
+  011. prescoring_status_nm | text | r.prescoring_status_nm
+  012. product_type_code | text | r.product_type_code
+  013. program_type | text | r.program_type
+  014. src_cd | text | r.src_cd
+  015. src_cd_src | text | r.src_cd_src
+  016. questionnaire_dttm | timestamp | r.questionnaire_dttm
+  017. original_effective_from_dttm_auto_kn | timestamp | r.original_effective_from_dttm_auto_kn
+  018. original_effective_from_dttm_kk_dk | timestamp | r.original_effective_from_dttm_kk_dk
+  019. status_observed_dttm | timestamp | r.status_observed_dttm
+
+TABLE &db_sbx.prt_tqs_questionnaire_routing
+Шаг 1.6. Исходные условия продуктовых веток; ни одна строка пока не удаляется.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire
+  001. source_row_id | bigint | q.source_row_id
+  002. questionnaire_id | text | q.questionnaire_id
+  003. application_num | text | q.application_num
+  004. utmcn | text | q.utmcn
+  005. utmcmd | text | q.utmcmd
+  006. utmcsr | text | q.utmcsr
+  007. utmctr | text | q.utmctr
+  008. utmcct | text | q.utmcct
+  009. status | text | q.status
+  010. scoring_status_nm | text | q.scoring_status_nm
+  011. prescoring_status_nm | text | q.prescoring_status_nm
+  012. product_type_code | text | q.product_type_code
+  013. program_type | text | q.program_type
+  014. src_cd | text | q.src_cd
+  015. src_cd_src | text | q.src_cd_src
+  016. questionnaire_dttm | timestamp | q.questionnaire_dttm
+  017. original_effective_from_dttm_auto_kn | timestamp | q.original_effective_from_dttm_auto_kn
+  018. original_effective_from_dttm_kk_dk | timestamp | q.original_effective_from_dttm_kk_dk
+  019. status_observed_dttm | timestamp | q.status_observed_dttm
+  020. is_kn | integer | CASE WHEN (q.src_cd_src LIKE '1376%' OR q.product_type_code IN ('cm.LiabilityType.Loan', 'RF', 'KN')) AND q.src_cd_src NOT LIKE '1383%' THEN 1 ELSE 0 END
+  021. is_kk | integer | CASE WHEN q.src_cd_src LIKE '1383%' OR q.product_type_code IN ('cm.LiabilityType.CreditCard', 'CreditCard', 'cm.LiabilityType.CreditCard cm.LiabilityType.Loan') THEN 1 ELSE 0 END
+  022. is_auto | integer | CASE WHEN q.src_cd_src LIKE '1388%' OR q.product_type_code IN ('AutoCredit', 'AutoCreditR', 'AutoLoan', 'cm.LoanApplicationTy', 'cm.LoanApplicationType.Standar', 'cm.LoanApplicationType.Standard') THEN 1 ELSE 0 END
+
+TABLE &db_sbx.prt_tqs_kk_questionnaire
+Шаг 1.7. Ветка KK: исходные status_name/приоритеты, продукт-константа; application_num сохранён.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_routing
+  001. source_row_id | bigint | r.source_row_id
+  002. application_num | text | r.application_num
+  003. questionnaire_id | text | r.questionnaire_id
+  004. questionnaire_dttm | timestamp | r.questionnaire_dttm
+  005. utmcn_info | text | r.utmcn
+  006. utmcmd_info | text | r.utmcmd
+  007. utmcsr_info | text | r.utmcsr
+  008. utmctr_info | text | r.utmctr
+  009. utmcct_info | text | r.utmcct
+  010. status_cd | text | r.status
+  011. scoring_status_nm | text | r.scoring_status_nm
+  012. prescoring_status_nm | text | r.prescoring_status_nm
+  013. product_type_cd | text | r.product_type_code
+  014. status_name | text | CASE WHEN r.status IN ('CANCELLED') THEN 'Отмена' WHEN r.status IN ('CHECKING') THEN 'На проверке' WHEN r.status IN ('CLIENT_DECLINE') THEN 'Отказ по инициативе клиента' WHEN r.status IN ('COURIER') THEN 'Курьер' WHEN r.status IN ('CREATED') THEN 'Создана' WHEN r.status IN ('DECLINE') THEN 'Отказ' WHEN r.status IN ('DELIVERY') THEN 'Доставка' WHEN r.status IN ('DONE') THEN 'Выдача' WHEN r.status IN ('DRAFT') THEN 'Черновик' WHEN r.status IN ('EXPIRED') THEN 'Просрочено' WHEN r.status IN ('FAILED') THEN 'Ошибка' WHEN r.status IN ('NEED_BKI') THEN 'Требуется проверка в БКИ' WHEN r.status IN ('NO_OFFER') THEN 'Нет предложения' WHEN r.status IN ('ONLY_SALE_POINT') THEN 'Выдача только в ТП' WHEN r.status IN ('SALE_POINT') THEN 'Необходим визит в ТП' WHEN r.status IN ('SCORING') THEN 'В процессе скоринга' WHEN r.status IN ('SELECT_CARD') THEN 'Выбор карты' ELSE COALESCE(r.status, 'Не определено') END
+  015. program_type | text | r.program_type
+  016. raw_src_cd | text | r.src_cd
+  017. src_cd | text | r.src_cd_src
+  018. level25_product_bp_nm | text | CAST('Кредитные карты' AS text)
+  019. product_branch | text | CAST('KK' AS text)
+  020. status_priority | integer | CAST(NULL AS integer)
+  021. original_effective_from_dttm | timestamp | r.original_effective_from_dttm_kk_dk
+  022. original_effective_from_dttm_auto_kn | timestamp | r.original_effective_from_dttm_auto_kn
+  023. original_effective_from_dttm_kk_dk | timestamp | r.original_effective_from_dttm_kk_dk
+  024. status_observed_dttm | timestamp | r.status_observed_dttm
+
+TABLE &db_sbx.prt_tqs_kn_questionnaire
+Шаг 1.8. Ветка KN: исходные status_name/приоритеты, продукт-константа; application_num сохранён.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_routing
+  001. source_row_id | bigint | r.source_row_id
+  002. application_num | text | r.application_num
+  003. questionnaire_id | text | r.questionnaire_id
+  004. questionnaire_dttm | timestamp | r.questionnaire_dttm
+  005. utmcn_info | text | r.utmcn
+  006. utmcmd_info | text | r.utmcmd
+  007. utmcsr_info | text | r.utmcsr
+  008. utmctr_info | text | r.utmctr
+  009. utmcct_info | text | r.utmcct
+  010. status_cd | text | r.status
+  011. scoring_status_nm | text | r.scoring_status_nm
+  012. prescoring_status_nm | text | r.prescoring_status_nm
+  013. product_type_cd | text | r.product_type_code
+  014. status_name | text | CASE WHEN r.status IN ('0') THEN 'Создана' WHEN r.status IN ('71') THEN 'Ошибка на прескоринге' WHEN r.status IN ('72') THEN 'Ошибка на скоринге' WHEN r.status IN ('90', 'CLIENT_DECLINE') THEN 'Закрыта' WHEN r.status IN ('CHECK_LIST_EMPTY', 'CHECK_LIST_UNDERWRITING', 'CHECK_LIST_ANTIFRAUD_OR_PRODUCT') THEN 'Одобрено' WHEN r.status IN ('HARD_DECLINE') THEN 'Жесткий отказ' WHEN r.status IN ('SOFT_DECLINE') THEN 'Не мораторный отказ' WHEN r.status IN ('SHORT_FORM') THEN 'Предварительно одобрено (call0)' WHEN r.status IN ('DONE') THEN 'Кредит выдан' WHEN r.status IN ('SCORING') THEN 'В процессе скоринга' WHEN r.status IN ('CONFIGURATION') THEN 'Подбор продукта' WHEN r.status IN ('ANTIFRAUD') THEN 'Антифрод' WHEN r.status IN ('CHOICE_CONFIRMATION') THEN 'Выбор способа подтверждения' WHEN r.status IN ('DATA_CORRECTION') THEN 'Корректировка данных' WHEN r.status IN ('DATA_CORRECTION_WAITING') THEN 'Корректировка данных (ожидание)' WHEN r.status IN ('FINAL_SCAN') THEN 'Сканирование документов' WHEN r.status IN ('FULL_FORM') THEN 'Полная заявка' WHEN r.status IN ('PRODUCT_ISSUE') THEN 'Формирование КОД' WHEN r.status IN ('UNDERWRITING') THEN 'Андеррайтинг' WHEN r.status IN ('TECHNICAL_DECLINE') THEN 'Отказ по техническим причинам' WHEN r.status IN ('IDENTIFICATION') THEN 'Идентификация' WHEN r.status IN ('CLARIFICATION') THEN 'Уточнение' WHEN r.status IN ('UNKNOWN-ERROR') THEN 'Неизвестная ошибка' ELSE COALESCE(r.status, 'Не определено') END
+  015. program_type | text | r.program_type
+  016. raw_src_cd | text | r.src_cd
+  017. src_cd | text | r.src_cd_src
+  018. level25_product_bp_nm | text | CAST('Потребкредит' AS text)
+  019. product_branch | text | CAST('KN' AS text)
+  020. status_priority | integer | CASE r.status WHEN 'создана' THEN 1 WHEN 'идентификация' THEN 2 WHEN 'полная заявка' THEN 3 WHEN 'корректировка данных (ожидание)' THEN 4 WHEN 'корректировка данных' THEN 5 WHEN 'подбор продукта' THEN 6 WHEN 'в процессе скоринга' THEN 7 WHEN 'предварительно одобрено (call0)' THEN 8 WHEN 'ошибка на прескоринге' THEN 9 WHEN 'неизвестная ошибка' THEN 10 WHEN 'ошибка на скоринге' THEN 11 WHEN 'жесткий отказ' THEN 12 WHEN 'не мораторный отказ' THEN 13 WHEN 'отказ по техническим причинам' THEN 14 WHEN 'одобрено' THEN 15 WHEN 'закрыта' THEN 16 WHEN '1' THEN 17 WHEN '10.0' THEN 18 WHEN '2.0' THEN 19 WHEN '3.0' THEN 20 WHEN '4.0' THEN 21 WHEN '9.0' THEN 22 WHEN '0' THEN 23 WHEN 'IDENTIFICATION' THEN 24 WHEN 'CHOICE_CONFIRMATION' THEN 25 WHEN 'FULL_FORM' THEN 26 WHEN 'DATA_CORRECTION' THEN 27 WHEN 'DATA_CORRECTION_WAITING' THEN 28 WHEN 'CONFIGURATION' THEN 29 WHEN 'SCORING' THEN 30 WHEN 'SHORT_FORM' THEN 31 WHEN '71' THEN 32 WHEN '72' THEN 33 WHEN 'CLARIFICATION' THEN 34 WHEN 'UNDERWRITING' THEN 35 WHEN 'HARD_DECLINE' THEN 36 WHEN 'SOFT_DECLINE' THEN 37 WHEN 'TECHNICAL_DECLINE' THEN 38 WHEN 'CHECK_LIST_ANTIFRAUD_OR_PRODUCT' THEN 39 WHEN 'CHECK_LIST_UNDERWRITING' THEN 40 WHEN 'CHECK_LIST_EMPTY' THEN 41 WHEN 'DECISION_EXPIRED' THEN 42 WHEN 'PRODUCT_ISSUE' THEN 43 WHEN 'DONE' THEN 44 WHEN 'UNKNOWN-ERROR' THEN 45 WHEN '90' THEN 46 WHEN 'CLIENT_DECLINE' THEN 47 ELSE NULL END
+  021. original_effective_from_dttm | timestamp | r.original_effective_from_dttm_auto_kn
+  022. original_effective_from_dttm_auto_kn | timestamp | r.original_effective_from_dttm_auto_kn
+  023. original_effective_from_dttm_kk_dk | timestamp | r.original_effective_from_dttm_kk_dk
+  024. status_observed_dttm | timestamp | r.status_observed_dttm
+
+TABLE &db_sbx.prt_tqs_auto_questionnaire
+Шаг 1.9. Ветка AUTO: исходные status_name/приоритеты, продукт-константа; application_num сохранён.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_routing
+  001. source_row_id | bigint | r.source_row_id
+  002. application_num | text | r.application_num
+  003. questionnaire_id | text | r.questionnaire_id
+  004. questionnaire_dttm | timestamp | r.questionnaire_dttm
+  005. utmcn_info | text | r.utmcn
+  006. utmcmd_info | text | r.utmcmd
+  007. utmcsr_info | text | r.utmcsr
+  008. utmctr_info | text | r.utmctr
+  009. utmcct_info | text | r.utmcct
+  010. status_cd | text | r.status
+  011. scoring_status_nm | text | r.scoring_status_nm
+  012. prescoring_status_nm | text | r.prescoring_status_nm
+  013. product_type_cd | text | r.product_type_code
+  014. status_name | text | CASE WHEN r.status IN ('OFFER_EXPIRED', 'OFFER_CLOSED', 'OFFER_CLOSED_END', 'OFFER_EXPIRED_ERROR') THEN 'Анкета в архиве' WHEN r.status IN ('ANTIFRAUD_REVIEW') THEN 'Антифрод' WHEN r.status IN ('ERROR_BL_CHECK') THEN 'В процессе комплексной проверки ожидается ручная обработка нефатальной ошибки' WHEN r.status IN ('CALCULATED', 'DOCUMENTS_CREATED', 'DOCUMENTS_SIGNED', 'DOCUMENTS_VIEWED', 'DOCUMENTS_CREATED_DS', 'CALCULATOR', 'CLIENT_DENIED', 'DS_SIGNED_TIMEOUT', 'EFS_SIGNED_SUCCESS', 'TESSA_ORDER_COMPLETE', 'DOCUMENTS_SIGNING_OPERATION_CREATED_SUCCESS', 'MASTER_ACCOUNT_ERROR', 'DOCUMENTS_SIGNED_SUCCESS', 'INITIATION_MDM_START', 'INITIATION_MDM_SUCCESS', 'DS_COD_IN_PROGRESS', 'DS_SIGNED_TIMEOUT_DEAL', 'DS_EFS_IN_PROGRESS', 'CAR_AMOUNT_CHANGED', 'ANTIFRAUD_SUCCESS', 'EFS_SIGNING_OPERATION_CREATED_SUCCESS', 'AUTO_INFO', 'EFS_CREATED_DS', 'DEALER_SELECTED', 'DOCUMENTS_CREATED_DS') THEN 'В работе' WHEN r.status IN ('TESSA_VER', 'DEAL_VER') THEN 'Верификация' WHEN r.status IN ('TESSA_VER_REVISION', 'TESSA_VER_ERROR', 'ORDER_CREATED_ERROR', 'TESSA_VER_TIMEOUT', 'DOSSIER_UPLOADED_ERROR') THEN 'Верификация не пройдена' WHEN r.status IN ('ORDER_CREATED', 'DOSSIER_UPLOADED', 'CREDIT_ISSUED', 'TESSA_VER_COMPLETE', 'DRIVER_CARD_ISSUE_UPLOADED', 'DRIVER_CARD_ISSUE') THEN 'Выдача' WHEN r.status IN ('HARD_DECLINE') THEN 'Жесткий отказ' WHEN r.status IN ('DS_SIGNED_ERROR_TECH', 'DS_SIGNED_ERROR') THEN 'Завершить оформление' WHEN r.status IN ('CLIENT_DENIED_END', 'PEOPLE_CARD_DATA_NOT_MATCH', 'CONTRACT_CANCEL_TIMEOUT', 'COMPLEX_ERROR', 'COMPLEX_REQUEST_DENY', 'COMPLEX_TECH_DENY', 'EFS_CREATED_ERROR', 'RCC_DENY_TECHNICAL_PROFILE') THEN 'Закрыта' WHEN r.status IN ('AUTOTEKA_REQUEST') THEN 'Запрос в Автотеку' WHEN r.status IN ('DECLINE_CALL2_BZK_IP') THEN 'Клиент не соответствует условиям программы' WHEN r.status IN ('LIMIT_PSK_SUCCESS', 'NO_CONSENT_FORM', 'NEED_DOCUMENTS_SIGN') THEN 'На доработку' WHEN r.status IN ('SCORING', 'BL_CHECK_SUCCESS', 'RECEIVED', 'CONDITIONS_SELECTED', 'SIGNED', 'BL_CHECK_AUTO_ABR', 'COMPLEX_ARBITRAGE_ABR') THEN 'На проверке' WHEN r.status IN ('UNDERWRITING') THEN 'На проверке риск-менеджером' WHEN r.status IN ('BL_CHECK', 'APPROVE_CALL0_CHECKED') THEN 'На рассмотрении' WHEN r.status IN ('DATA_CORRECTION_WAITING') THEN 'Корректировка данных (ожидание)' WHEN r.status IN ('NEED_PHYSICAL_APPROVE') THEN 'Необходим визит в ТП' WHEN r.status IN ('ACCEPT_VEHICLE') THEN 'Одобрение по транспортному средству' WHEN r.status IN ('APPROVE_CALL2', 'PRE_APPROVED', 'APPROVED', 'APPROVE_RKK', 'APPROVE_CALL3', 'APPROVE') THEN 'Одобрено' WHEN r.status IN ('PRODUCT_BASKET_SIGNED') THEN 'Ожидает зачисления' WHEN r.status IN ('DECLINE_CALL2_SOFT', 'DECLINE_CALL2_HARD', 'DECLINE_CALL0_MORATOR', 'DECLINE_CALL0_MIN_REQUIREMENTS', 'DECLINE_CALL3_HARD', 'DECLINE_CALL3_SOFT', 'DECLINE_CALL0_PASSPORT', 'DECLINE_BL_CHECK', 'DECLINE_UNEMPLOYED', 'RCC_DENIED_SOFT', 'DECLINE_CALL2_NO_AGREEMENTS', 'RCC_DENIED', 'DECLINE_FORBIDDEN_REGIONS') THEN 'Отказ' WHEN r.status IN ('LIMIT_PSK_CRITICAL', 'ANTIFRAUD_DENY', 'LIABILITY_DENIED', 'DECLINE_VISUAL_CHECK') THEN 'Отказ банка' WHEN r.status IN ('CLIENT_DENIED_FINISH', 'DS_CLIENT_DENIED', 'CONTRACT_DELETED', 'RESTART_DENY', 'RESTART_EXPIRED') THEN 'Отказ по инициативе клиента' WHEN r.status IN ('DECLINE_BY_PRODUCT_PARAM') THEN 'Отказ по параметрам продукта' WHEN r.status IN ('TO_BE_DELETED', 'SPM_CHECK', 'SPM_SUCCESS', 'CONTRACT_CREATED', 'PRODUCT_BASKET_START', 'PRODUCT_BASKET_CREATED', 'SPM_DECLINE', 'PRODUCT_BASKET_DENIED', 'PRODUCT_BASKET_TIMEOUT', 'SIGN_WAY_NEEDED', 'ERROR_ONBOARD', 'CONTRACT_EXPIRED_ERROR', 'RCC_MISMATCH_GP', 'TESSA_TECH_ERROR', 'SPM_ERROR', 'CONTRACT_ERROR_TIMEOUT', 'INCORRECT_PAYMENT_DETAILS', 'CREATE_TRNS_PLAN_ERROR', 'CONTRACT_DENY_ERROR', 'PRODUCT_BASKET_ERROR', 'SUA_ID_SEARCH_ERROR', 'PRODUCT_BASKET_CRITICAL', 'INSURANCE_POLICY_CREATED_ERROR', 'ORDER_CREATED_ERROR_TIMEOUT', 'COMPLEX_REQUEST_TECH_ERROR', 'DRIVER_CARD_ISSUE_UPLOAD_ERROR', 'PRODUCT_BASKET_UNKNOWN', 'TAX_CODE_SEARCH_ERROR', 'SPM_ERROR_FATAL', 'LIMIT_PSK_ERROR', 'DECLINE_CALL0_TECH', 'EFS_UPLOAD_ERROR', 'CLIENT_DENIED_ERROR', 'INITIATION_MDM_ERROR') THEN 'Ошибка' WHEN r.status IN ('AUTOTEKA_ERROR') THEN 'Ошибка при запросе в Автотеку' WHEN r.status IN ('INVALID_DATA', 'ERROR_CALL0', 'CONTRACT_ERROR', 'ERROR_FATAL', 'ERROR_CALL3', 'INITIATION_CALL2', 'TESSA_VER_REJECT', 'RCC_CORRECT_PLEDGE', 'RCC_CALL6_ERROR', 'RCC_RETRY', 'ACCOUNT_BLOCKED', 'RCC_CORRECT_RETRY', 'RCC_PROCESSING_SUPPORT', 'RCC_CALL5_ERROR', 'DOCUMENTS_CREATED_ERROR', 'ERROR_CALL3', 'ANTIFRAUD_ERROR', 'CAR_OVERPRICED', 'RCC_CALL4_ERROR', 'RCC_CORRECT_PLEDGE_AND_SELLER', 'ERROR_APPROVED', 'PEOPLE_CARD_DATA_ERROR', 'RCC_CORRECT_SELLER', 'COMPLEX_REQUEST_TIMEOUT_ERROR', 'SFR_ERROR_UNC_UNDEFINED', 'RCC_DENY_TECHNICAL', 'CAR_AMOUNT_CHANGED_CRITICAL') THEN 'Проверка не пройдена' WHEN r.status IN ('CORRECTION_CALL3') THEN 'Проверка риск-менеджером не пройдена' WHEN r.status IN ('DECLINE_CALL2_TECH') THEN 'Технический отказ на call2' WHEN r.status IN ('DECLINE_CALL3_TECH') THEN 'Технический отказ на call3' WHEN r.status IN ('ERROR_FATAL_AUTOTEKA') THEN 'Фатальная ошибка при запросе в Автотеку' WHEN r.status IN ('BL_ERROR_FATAL') THEN 'Фатальная ошибка при обращении к ОС Комплексные проверки /ОС Комплаенс через сервис alpp-cmn-checks' WHEN r.status IN ('EFS_UPLOAD_TRANSFER_SUCCESS', 'HASH_EFS_SUCCESS', 'EFS_UPLOAD_SUCCESS', 'COMPLEX_SUCCESS', 'EFS_UPLOAD_TRANSFER_ERROR') THEN 'Формирование КОД' WHEN r.status IN ('APPROVE_CALL0', 'DRAFT', 'FROZEN', 'PRESCORING') THEN 'Черновик' ELSE COALESCE(r.status, 'Не определено') END
+  015. program_type | text | r.program_type
+  016. raw_src_cd | text | r.src_cd
+  017. src_cd | text | r.src_cd_src
+  018. level25_product_bp_nm | text | CAST('Автокредит' AS text)
+  019. product_branch | text | CAST('AUTO' AS text)
+  020. status_priority | integer | CASE WHEN r.status IS NULL THEN 187 ELSE CASE r.status WHEN 'ISSUANCE_STATUS_TIMEOUT' THEN 1 WHEN 'INCORRECT_PAYMENT_DETAILS' THEN 2 WHEN 'ANTIFRAUD_REVIEW' THEN 3 WHEN 'ERROR_ONBOARD' THEN 4 WHEN 'DEAL_VER' THEN 5 WHEN 'INITIATION_MDM_NO_CLIENT' THEN 6 WHEN 'INITIATION_MDM_START' THEN 7 WHEN 'AFL_OPERATION_CREATED_SUCCESS' THEN 8 WHEN 'TESSA_ORDER_COMPLETE' THEN 9 WHEN 'APPROVE_RKK' THEN 10 WHEN 'DECLINE_BY_PRODUCT_PARAM' THEN 11 WHEN 'DS_AFL_IN_PROGRESS' THEN 12 WHEN 'TESSA_ORDER_REJECT' THEN 13 WHEN 'DECLINE_UNEMPLOYED' THEN 14 WHEN 'CREATE_TRNS_PLAN_ERROR' THEN 15 WHEN 'AFL_ORDER_ERROR_CRIT' THEN 16 WHEN 'INITIATION_MDM_SUCCESS' THEN 17 WHEN 'DS_COD_IN_PROGRESS' THEN 18 WHEN 'EFS_SIGNED_SUCCESS' THEN 19 WHEN 'CONTRACT_CREATED' THEN 20 WHEN 'DOCUMENTS_SIGNED' THEN 21 WHEN 'EFS_SIGNING_OPERATION_CREATED_SUCCESS' THEN 22 WHEN 'CLIENT_DENIED' THEN 23 WHEN 'CLIENT_DENIED_FINISH' THEN 24 WHEN 'DOCUMENTS_SIGNING_OPERATION_CREATED_SUCCESS' THEN 25 WHEN 'DS_EFS_IN_PROGRESS' THEN 26 WHEN 'DS_SIGNED_TIMEOUT_DEAL' THEN 27 WHEN 'MASTER_ACCOUNT_ERROR' THEN 28 WHEN 'DOCUMENTS_VIEWED' THEN 29 WHEN 'ANTIFRAUD_SUCCESS' THEN 30 WHEN 'DS_SIGNED_TIMEOUT' THEN 31 WHEN 'CALCULATOR' THEN 32 WHEN 'CALCULATED' THEN 33 WHEN 'DOCUMENTS_CREATED' THEN 34 WHEN 'CAR_AMOUNT_CHANGED' THEN 35 WHEN 'DOCUMENTS_CREATED_DS' THEN 36 WHEN 'OFFER_CLOSED' THEN 37 WHEN 'OFFER_EXPIRED' THEN 38 WHEN 'OFFER_CLOSED_END' THEN 39 WHEN 'TESSA_VER' THEN 40 WHEN 'TESSA_VER_REVISION' THEN 41 WHEN 'TESSA_VER_TIMEOUT' THEN 42 WHEN 'ORDER_CREATED_ERROR' THEN 43 WHEN 'TESSA_VER_ERROR' THEN 44 WHEN 'DOSSIER_UPLOADED_ERROR' THEN 45 WHEN 'FROZEN' THEN 46 WHEN 'DRAFT' THEN 47 WHEN 'APPROVE_CALL0' THEN 48 WHEN 'PRESCORING' THEN 49 WHEN 'LIMIT_PSK_SUCCESS' THEN 50 WHEN 'NEED_DOCUMENTS_SIGN' THEN 51 WHEN 'NO_CONSENT_FORM' THEN 52 WHEN 'APPROVE_CALL0_CHECKED' THEN 53 WHEN 'BL_CHECK' THEN 54 WHEN 'SCORING' THEN 55 WHEN 'CONDITIONS_SELECTED' THEN 56 WHEN 'BL_CHECK_AUTO_ABR' THEN 57 WHEN 'RECEIVED' THEN 58 WHEN 'BL_CHECK_SUCCESS' THEN 59 WHEN 'SIGNED' THEN 60 WHEN 'UNDERWRITING' THEN 61 WHEN 'RCC_CALL5_ERROR' THEN 62 WHEN 'PEOPLE_CARD_DATA_ERROR' THEN 63 WHEN 'ERROR_CALL3' THEN 64 WHEN 'RCC_DENY_TECHNICAL' THEN 65 WHEN 'CONTRACT_ERROR' THEN 66 WHEN 'INVALID_DATA' THEN 67 WHEN 'ERROR_FATAL' THEN 68 WHEN 'DOCUMENTS_CREATED_ERROR' THEN 69 WHEN 'RCC_CORRECT_RETRY' THEN 70 WHEN 'ERROR_CALL2' THEN 71 WHEN 'ERROR_CALL0' THEN 72 WHEN 'TESSA_VER_REJECT' THEN 73 WHEN 'RCC_CORRECT_PLEDGE_AND_SELLER' THEN 74 WHEN 'COMPLEX_REQUEST_TIMEOUT_ERROR' THEN 75 WHEN 'ACCOUNT_BLOCKED' THEN 76 WHEN 'RCC_CALL6_ERROR' THEN 77 WHEN 'RCC_RETRY' THEN 78 WHEN 'RCC_CALL4_ERROR' THEN 79 WHEN 'CAR_OVERPRICED' THEN 80 WHEN 'RCC_CORRECT_PLEDGE' THEN 81 WHEN 'CORRECTION_CALL2' THEN 82 WHEN 'RCC_PROCESSING_SUPPORT' THEN 83 WHEN 'ERROR_APPROVED' THEN 84 WHEN 'ANTIFRAUD_ERROR' THEN 85 WHEN 'CORRECTION_CALL3' THEN 86 WHEN 'CONTRACT_EXPIRED_ERROR' THEN 87 WHEN 'PRODUCT_BASKET_DENIED' THEN 88 WHEN 'DRIVER_CARD_ISSUE_UPLOAD_ERROR' THEN 89 WHEN 'PRODUCT_BASKET_TIMEOUT' THEN 90 WHEN 'ORDER_CREATED_ERROR_TIMEOUT' THEN 91 WHEN 'PRODUCT_BASKET_ERROR' THEN 92 WHEN 'PRODUCT_BASKET_CREATED' THEN 93 WHEN 'LIMIT_PSK_ERROR' THEN 94 WHEN 'CONTRACT_ERROR_TIMEOUT' THEN 95 WHEN 'CONTRACT_DENY_ERROR' THEN 96 WHEN 'TESSA_TECH_ERROR' THEN 97 WHEN 'SIGN_WAY_NEEDED' THEN 98 WHEN 'PRODUCT_BASKET_UNKNOWN' THEN 99 WHEN 'TO_BE_DELETED' THEN 100 WHEN 'PRODUCT_BASKET_CRITICAL' THEN 101 WHEN 'PRODUCT_BASKET_START' THEN 102 WHEN 'INSURANCE_POLICY_CREATED_ERROR' THEN 103 WHEN 'SPM_ERROR' THEN 104 WHEN 'SPM_DECLINE' THEN 105 WHEN 'SPM_SUCCESS' THEN 106 WHEN 'SUA_ID_SEARCH_ERROR' THEN 107 WHEN 'CONTRACT_CANCEL_TIMEOUT' THEN 108 WHEN 'RCC_MISMATCH_GP' THEN 109 WHEN 'SPM_CHECK' THEN 110 WHEN 'NEED_PHYSICAL_APPROVE' THEN 111 WHEN 'DS_SIGNED_ERROR_TECH' THEN 112 WHEN 'DS_SIGNED_ERROR' THEN 113 WHEN 'BL_ERROR_FATAL' THEN 114 WHEN 'AUTOTEKA_REQUEST' THEN 115 WHEN 'ERROR_BL_CHECK' THEN 116 WHEN 'EFS_UPLOAD_TRANSFER_SUCCESS' THEN 117 WHEN 'EFS_UPLOAD_SUCCESS' THEN 118 WHEN 'COMPLEX_SUCCESS' THEN 119 WHEN 'HASH_EFS_SUCCESS' THEN 120 WHEN 'EFS_UPLOAD_TRANSFER_ERROR' THEN 121 WHEN 'DECLINE_VEHICLE' THEN 122 WHEN 'CONTRACT_DELETED' THEN 123 WHEN 'DS_CLIENT_DENIED' THEN 124 WHEN 'RESTART_DENY' THEN 125 WHEN 'DECLINE_CALL3_SOFT' THEN 126 WHEN 'DECLINE_CALL2_SOFT' THEN 127 WHEN 'DECLINE_CALL0_MORATOR' THEN 128 WHEN 'DECLINE_CALL0_PASSPORT' THEN 129 WHEN 'RCC_DENIED' THEN 130 WHEN 'RCC_DENIED_SOFT' THEN 131 WHEN 'DECLINE_CALL0_MIN_REQUIREMENTS' THEN 132 WHEN 'DECLINE_BL_CHECK' THEN 133 WHEN 'DECLINE_CALL2_NO_AGREEMENTS' THEN 134 WHEN 'DECLINE_CALL3_HARD' THEN 135 WHEN 'DECLINE_CALL2_HARD' THEN 136 WHEN 'LIABILITY_DENIED' THEN 137 WHEN 'DECLINE_VISUAL_CHECK' THEN 138 WHEN 'ANTIFRAUD_DENY' THEN 139 WHEN 'LIMIT_PSK_CRITICAL' THEN 140 WHEN 'DECLINE_CALL2_TECH' THEN 141 WHEN 'ACCEPT_VEHICLE' THEN 142 WHEN 'APPROVE' THEN 143 WHEN 'APPROVE_CALL3' THEN 144 WHEN 'APPROVE_CALL2' THEN 145 WHEN 'PRE_APPROVED' THEN 146 WHEN 'APPROVED' THEN 147 WHEN 'PRODUCT_BASKET_SIGNED' THEN 148 WHEN 'DOSSIER_UPLOADED' THEN 149 WHEN 'CREDIT_ISSUED' THEN 150 WHEN 'ORDER_CREATED' THEN 151 WHEN 'TESSA_VER_COMPLETE' THEN 152 WHEN 'DRIVER_CARD_ISSUE_UPLOADED' THEN 153 WHEN 'DRIVER_CARD_ISSUE' THEN 154 WHEN 'CLIENT_DENIED_END' THEN 155 WHEN 'COMPLEX_ERROR' THEN 156 WHEN 'RCC_DENY_TECHNICAL_PROFILE' THEN 157 WHEN 'PEOPLE_CARD_DATA_NOT_MATCH' THEN 158 WHEN 'DOCUMENTS_SIGNED_SUCCESS' THEN 159 WHEN 'DEAL_EXECUTION_DELAY' THEN 160 WHEN 'AFL_ORDER_SIGNED' THEN 161 WHEN 'PTI_CHANGED' THEN 162 WHEN 'DECISION_EXPIRED_SELFLOCK' THEN 163 WHEN 'AFL_ORDER_TIMEOUT' THEN 164 WHEN 'TAX_CODE_SEARCH_ERROR' THEN 165 WHEN 'DECISION_EXPIRED_NOT_RECEIVED_INN' THEN 166 WHEN 'AFL_READY_CONFIRMATION' THEN 167 WHEN 'RCC_FORBIDDEN' THEN 168 WHEN 'COMPLEX_REQUEST_DENY' THEN 169 WHEN 'RCC_CORRECT_SELLER' THEN 170 WHEN 'EFS_CREATED_ERROR' THEN 171 WHEN 'COMPLEX_TECH_DENY' THEN 172 WHEN 'INITIATION_MDM_NO_UNK' THEN 173 WHEN 'DECLINE_FORBIDDEN_REGIONS' THEN 174 WHEN 'SPM_ERROR_FATAL' THEN 175 WHEN 'COMPLEX_REQUEST_TECH_ERROR' THEN 176 WHEN 'PTI_UPDATE_ERROR' THEN 177 WHEN 'DECLINE_CALL0_TECH' THEN 178 WHEN 'AFL_ORDER_REJECT' THEN 179 WHEN 'RCC_FORBIDDEN_NOT_FOUND' THEN 180 WHEN 'SEARCH_EFS' THEN 181 WHEN 'HASH_EFS_TECH_ERROR' THEN 182 WHEN 'INITIATION_MDM_ERROR' THEN 183 WHEN 'RCC_FORBIDDEN_ONLINE' THEN 184 WHEN 'AUTOTEKA_ERROR' THEN 185 WHEN 'ERROR_FATAL_AUTOTEKA' THEN 186 ELSE NULL END END
+  021. original_effective_from_dttm | timestamp | r.original_effective_from_dttm_auto_kn
+  022. original_effective_from_dttm_auto_kn | timestamp | r.original_effective_from_dttm_auto_kn
+  023. original_effective_from_dttm_kk_dk | timestamp | r.original_effective_from_dttm_kk_dk
+  024. status_observed_dttm | timestamp | r.status_observed_dttm
+
+TABLE &db_sbx.prt_tqs_kn_auto_pre_eff_calc
+Шаг 1.10. КН/авто: исходный LAG/COUNT для совпадающих времён статусов.
+Читает: sbx_pre_orb_fd.prt_tqs_kn_questionnaire, sbx_pre_orb_fd.prt_tqs_auto_questionnaire
+  001. source_row_id | bigint | source_row_id
+  002. application_num | text | application_num
+  003. questionnaire_id | text | questionnaire_id
+  004. questionnaire_dttm | timestamp | questionnaire_dttm
+  005. utmcn_info | text | utmcn_info
+  006. utmcmd_info | text | utmcmd_info
+  007. utmcsr_info | text | utmcsr_info
+  008. utmctr_info | text | utmctr_info
+  009. utmcct_info | text | utmcct_info
+  010. status_cd | text | status_cd
+  011. scoring_status_nm | text | scoring_status_nm
+  012. prescoring_status_nm | text | prescoring_status_nm
+  013. product_type_cd | text | product_type_cd
+  014. status_name | text | status_name
+  015. program_type | text | program_type
+  016. raw_src_cd | text | raw_src_cd
+  017. src_cd | text | src_cd
+  018. level25_product_bp_nm | text | level25_product_bp_nm
+  019. product_branch | text | product_branch
+  020. status_priority | integer | status_priority
+  021. original_effective_from_dttm | timestamp | original_effective_from_dttm
+  022. original_effective_from_dttm_auto_kn | timestamp | original_effective_from_dttm_auto_kn
+  023. original_effective_from_dttm_kk_dk | timestamp | original_effective_from_dttm_kk_dk
+  024. status_observed_dttm | timestamp | status_observed_dttm
+  025. diff_sec | bigint | COALESCE(EXTRACT(SECONDS FROM original_effective_from_dttm - lag(original_effective_from_dttm) OVER (PARTITION BY questionnaire_id, CASE WHEN NULLIF(btrim(questionnaire_id), '') IS NULL THEN source_row_id ELSE NULL END ORDER BY original_effective_from_dttm, status_priority, CASE WHEN status_priority IS NULL AND level25_product_bp_nm = CAST('Автокредит' AS text) THEN status_name ELSE '1' END ASC)), 1)
+  026. count_eq_ef | bigint | count(*) OVER (PARTITION BY questionnaire_id, CASE WHEN NULLIF(btrim(questionnaire_id), '') IS NULL THEN source_row_id ELSE NULL END, original_effective_from_dttm ORDER BY status_priority, CASE WHEN status_priority IS NULL AND level25_product_bp_nm = CAST('Автокредит' AS text) THEN status_name ELSE '1' END ASC)
+  027. count_eq_ef_not_ordered | bigint | count(*) OVER (PARTITION BY questionnaire_id, CASE WHEN NULLIF(btrim(questionnaire_id), '') IS NULL THEN source_row_id ELSE NULL END, original_effective_from_dttm)
+  028. full_diff_seconds | numeric | EXTRACT(EPOCH FROM original_effective_from_dttm - lag(original_effective_from_dttm) OVER (PARTITION BY questionnaire_id, CASE WHEN NULLIF(btrim(questionnaire_id), '') IS NULL THEN source_row_id ELSE NULL END ORDER BY original_effective_from_dttm, status_priority, CASE WHEN status_priority IS NULL AND level25_product_bp_nm = CAST('Автокредит' AS text) THEN status_name ELSE '1' END ASC))
+
+TABLE &db_sbx.prt_tqs_kn_auto_questionnaire
+Шаг 1.11. КН/авто: сдвиг на секунды по исходной формуле, без потери номера.
+Читает: sbx_pre_orb_fd.prt_tqs_kn_auto_pre_eff_calc
+  001. source_row_id | bigint | source_row_id
+  002. application_num | text | application_num
+  003. questionnaire_id | text | questionnaire_id
+  004. questionnaire_dttm | timestamp | questionnaire_dttm
+  005. utmcn_info | text | utmcn_info
+  006. utmcmd_info | text | utmcmd_info
+  007. utmcsr_info | text | utmcsr_info
+  008. utmctr_info | text | utmctr_info
+  009. utmcct_info | text | utmcct_info
+  010. status_cd | text | status_cd
+  011. scoring_status_nm | text | scoring_status_nm
+  012. prescoring_status_nm | text | prescoring_status_nm
+  013. product_type_cd | text | product_type_cd
+  014. status_name | text | status_name
+  015. program_type | text | program_type
+  016. raw_src_cd | text | raw_src_cd
+  017. src_cd | text | src_cd
+  018. level25_product_bp_nm | text | level25_product_bp_nm
+  019. product_branch | text | product_branch
+  020. status_priority | integer | status_priority
+  021. original_effective_from_dttm | timestamp | original_effective_from_dttm
+  022. original_effective_from_dttm_auto_kn | timestamp | original_effective_from_dttm_auto_kn
+  023. original_effective_from_dttm_kk_dk | timestamp | original_effective_from_dttm_kk_dk
+  024. status_observed_dttm | timestamp | status_observed_dttm
+  025. effective_from_dttm | timestamp | CASE WHEN diff_sec = 0 THEN original_effective_from_dttm + (count_eq_ef - 1) * CAST('1 second' AS interval) WHEN diff_sec > 0 AND COALESCE(lag(count_eq_ef_not_ordered) OVER (PARTITION BY questionnaire_id, CASE WHEN NULLIF(btrim(questionnaire_id), '') IS NULL THEN source_row_id ELSE NULL END ORDER BY original_effective_from_dttm, status_priority), 0) >= diff_sec THEN original_effective_from_dttm + (lag(count_eq_ef_not_ordered) OVER (PARTITION BY questionnaire_id, CASE WHEN NULLIF(btrim(questionnaire_id), '') IS NULL THEN source_row_id ELSE NULL END ORDER BY original_effective_from_dttm, status_priority) - diff_sec) * CAST('1 second' AS interval) ELSE original_effective_from_dttm END
+
+TABLE &db_sbx.prt_tqs_questionnaire_all
+Шаг 1.12. Общая история трёх продуктов: все атрибуты исходного TQS и application_num.
+Читает: sbx_pre_orb_fd.prt_tqs_kk_questionnaire, sbx_pre_orb_fd.prt_tqs_kn_auto_questionnaire
+  001. source_row_id | bigint | k.source_row_id
+  002. application_num | text | k.application_num
+  003. questionnaire_id | text | k.questionnaire_id
+  004. questionnaire_dttm | timestamp | k.questionnaire_dttm
+  005. utmcn_info | text | k.utmcn_info
+  006. utmcmd_info | text | k.utmcmd_info
+  007. utmcsr_info | text | k.utmcsr_info
+  008. utmctr_info | text | k.utmctr_info
+  009. utmcct_info | text | k.utmcct_info
+  010. status_cd | text | k.status_cd
+  011. scoring_status_nm | text | k.scoring_status_nm
+  012. prescoring_status_nm | text | k.prescoring_status_nm
+  013. product_type_cd | text | k.product_type_cd
+  014. status_name | text | k.status_name
+  015. program_type | text | k.program_type
+  016. raw_src_cd | text | k.raw_src_cd
+  017. src_cd | text | k.src_cd
+  018. level25_product_bp_nm | text | k.level25_product_bp_nm
+  019. product_branch | text | k.product_branch
+  020. status_priority | integer | k.status_priority
+  021. original_effective_from_dttm | timestamp | k.original_effective_from_dttm
+  022. original_effective_from_dttm_auto_kn | timestamp | k.original_effective_from_dttm_auto_kn
+  023. original_effective_from_dttm_kk_dk | timestamp | k.original_effective_from_dttm_kk_dk
+  024. status_observed_dttm | timestamp | k.status_observed_dttm
+  025. effective_from_dttm | timestamp | k.original_effective_from_dttm
+
+TABLE &db_sbx.prt_tqs_questionnaire_rk
+Шаг 1.13. Новый источник RK: актуальные уникальные пары ID/RK из связи анкета–клиент.
+Читает: dm_pik_fd_cdmr.tech_questionnaire_x_customer
+  001. questionnaire_id | text | CAST(x.questionnaire_id AS text)
+  002. questionnaire_rk | bigint | CAST(x.questionnaire_rk AS bigint)
+
+TABLE &db_sbx.prt_tqs_questionnaire_with_rk
+Шаг 1.14. Присоединяем настоящий RK; анкеты без RK остаются, разные RK не схлопываем.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_all, sbx_pre_orb_fd.prt_tqs_questionnaire_rk
+  001. questionnaire_rk | bigint | m.questionnaire_rk
+  002. source_row_id | bigint | a.source_row_id
+  003. application_num | text | a.application_num
+  004. questionnaire_id | text | a.questionnaire_id
+  005. questionnaire_dttm | timestamp | a.questionnaire_dttm
+  006. utmcn_info | text | a.utmcn_info
+  007. utmcmd_info | text | a.utmcmd_info
+  008. utmcsr_info | text | a.utmcsr_info
+  009. utmctr_info | text | a.utmctr_info
+  010. utmcct_info | text | a.utmcct_info
+  011. status_cd | text | a.status_cd
+  012. scoring_status_nm | text | a.scoring_status_nm
+  013. prescoring_status_nm | text | a.prescoring_status_nm
+  014. product_type_cd | text | a.product_type_cd
+  015. status_name | text | a.status_name
+  016. program_type | text | a.program_type
+  017. raw_src_cd | text | a.raw_src_cd
+  018. src_cd | text | a.src_cd
+  019. level25_product_bp_nm | text | a.level25_product_bp_nm
+  020. product_branch | text | a.product_branch
+  021. status_priority | integer | a.status_priority
+  022. original_effective_from_dttm | timestamp | a.original_effective_from_dttm
+  023. original_effective_from_dttm_auto_kn | timestamp | a.original_effective_from_dttm_auto_kn
+  024. original_effective_from_dttm_kk_dk | timestamp | a.original_effective_from_dttm_kk_dk
+  025. status_observed_dttm | timestamp | a.status_observed_dttm
+  026. effective_from_dttm | timestamp | a.effective_from_dttm
+  027. rk_mapping_count | bigint | COALESCE(m.rk_mapping_count, 0)
+
+TABLE &db_sbx.prt_qas_tech_questionnaire_status
+Шаг 1.15. Копия кредитной цепочки tech_questionnaire_status: LEAD интервалов + номер заявки.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_with_rk
+  001. questionnaire_rk | bigint | q.questionnaire_rk
+  002. source_row_id | bigint | q.source_row_id
+  003. application_num | text | q.application_num
+  004. questionnaire_id | text | q.questionnaire_id
+  005. questionnaire_dttm | timestamp | q.questionnaire_dttm
+  006. utmcn_info | text | q.utmcn_info
+  007. utmcmd_info | text | q.utmcmd_info
+  008. utmcsr_info | text | q.utmcsr_info
+  009. utmctr_info | text | q.utmctr_info
+  010. utmcct_info | text | q.utmcct_info
+  011. status_cd | text | q.status_cd
+  012. scoring_status_nm | text | q.scoring_status_nm
+  013. prescoring_status_nm | text | q.prescoring_status_nm
+  014. product_type_cd | text | q.product_type_cd
+  015. status_name | text | q.status_name
+  016. program_type | text | q.program_type
+  017. raw_src_cd | text | q.raw_src_cd
+  018. src_cd | text | q.src_cd
+  019. level25_product_bp_nm | text | q.level25_product_bp_nm
+  020. product_branch | text | q.product_branch
+  021. status_priority | integer | q.status_priority
+  022. original_effective_from_dttm | timestamp | q.original_effective_from_dttm
+  023. original_effective_from_dttm_auto_kn | timestamp | q.original_effective_from_dttm_auto_kn
+  024. original_effective_from_dttm_kk_dk | timestamp | q.original_effective_from_dttm_kk_dk
+  025. status_observed_dttm | timestamp | q.status_observed_dttm
+  026. effective_from_dttm | timestamp | q.effective_from_dttm
+  027. rk_mapping_count | bigint | q.rk_mapping_count
+  028. effective_to_dttm | timestamp | CAST(lead(q.effective_from_dttm, 1, CAST('2999-12-31' AS timestamp)) OVER (PARTITION BY q.questionnaire_rk, CASE WHEN q.questionnaire_rk IS NULL THEN q.questionnaire_id ELSE NULL END, CASE WHEN q.questionnaire_rk IS NULL THEN q.level25_product_bp_nm ELSE NULL END, CASE WHEN NULLIF(btrim(q.questionnaire_id), '') IS NULL THEN q.source_row_id ELSE NULL END ORDER BY q.effective_from_dttm, q.status_priority NULLS LAST, q.status_name NULLS LAST, q.source_row_id, q.questionnaire_id) AS timestamp)
+  029. processed_dttm | timestamp | CAST(&p_report_timestamp AS timestamp)
+
+TABLE &db_sbx.prt_tqs_questionnaire_verified
+Шаг 1.16. Верификация и все номера по истории ДО выбора действующей версии.
+Читает: sbx_pre_orb_fd.prt_qas_tech_questionnaire_status
+  001. questionnaire_rk | bigint | q.questionnaire_rk
+  002. source_row_id | bigint | q.source_row_id
+  003. application_num | text | q.application_num
+  004. questionnaire_id | text | q.questionnaire_id
+  005. questionnaire_dttm | timestamp | q.questionnaire_dttm
+  006. utmcn_info | text | q.utmcn_info
+  007. utmcmd_info | text | q.utmcmd_info
+  008. utmcsr_info | text | q.utmcsr_info
+  009. utmctr_info | text | q.utmctr_info
+  010. utmcct_info | text | q.utmcct_info
+  011. status_cd | text | q.status_cd
+  012. scoring_status_nm | text | q.scoring_status_nm
+  013. prescoring_status_nm | text | q.prescoring_status_nm
+  014. product_type_cd | text | q.product_type_cd
+  015. status_name | text | q.status_name
+  016. program_type | text | q.program_type
+  017. raw_src_cd | text | q.raw_src_cd
+  018. src_cd | text | q.src_cd
+  019. level25_product_bp_nm | text | q.level25_product_bp_nm
+  020. product_branch | text | q.product_branch
+  021. status_priority | integer | q.status_priority
+  022. original_effective_from_dttm | timestamp | q.original_effective_from_dttm
+  023. original_effective_from_dttm_auto_kn | timestamp | q.original_effective_from_dttm_auto_kn
+  024. original_effective_from_dttm_kk_dk | timestamp | q.original_effective_from_dttm_kk_dk
+  025. status_observed_dttm | timestamp | q.status_observed_dttm
+  026. effective_from_dttm | timestamp | q.effective_from_dttm
+  027. rk_mapping_count | bigint | q.rk_mapping_count
+  028. effective_to_dttm | timestamp | q.effective_to_dttm
+  029. processed_dttm | timestamp | q.processed_dttm
+  030. verification_flg | boolean | CASE WHEN NULLIF(btrim(q.questionnaire_id), '') IS NULL THEN CAST(NULL AS boolean) ELSE max(CASE WHEN q.level25_product_bp_nm = CAST('Потребкредит' AS text) AND q.status_cd IN ('0', '10.0', 'одобрено', 'CHECK_LIST_EMPTY', 'CHECK_LIST_ANTIFRAUD_OR_PRODUCT') THEN 1 WHEN q.level25_product_bp_nm = CAST('Кредитные карты' AS text) AND q.status_cd IN ('DONE', 'COURIER') THEN 1 WHEN q.level25_product_bp_nm = CAST('Автокредит' AS text) AND q.status_cd IN ('APPROVE_RKK', 'APPROVED', 'PRE_APPROVED', 'APPROVE_CALL2', 'APPROVE_CALL3', 'ORDER_CREATED', 'VERIFICATION', 'DRIVER_CARD_ISSUE', 'DRIVER_CARD_ISSUE_UPLOADED', 'DOSSIER_UPLOADED', 'DEAL_VER', 'CREDIT_ISSUED', 'PRODUCT_BASKET_SIGNED') THEN 1 ELSE 0 END) OVER (PARTITION BY q.questionnaire_rk, CASE WHEN q.questionnaire_rk IS NULL THEN q.questionnaire_id ELSE NULL END, CASE WHEN q.questionnaire_rk IS NULL THEN q.level25_product_bp_nm ELSE NULL END, CASE WHEN NULLIF(btrim(q.questionnaire_id), '') IS NULL THEN q.source_row_id ELSE NULL END, q.level25_product_bp_nm) = 1 END
+  031. application_nums | text[] | array_agg(q.application_num) OVER (PARTITION BY q.questionnaire_rk, CASE WHEN q.questionnaire_rk IS NULL THEN q.questionnaire_id ELSE NULL END, CASE WHEN q.questionnaire_rk IS NULL THEN q.level25_product_bp_nm ELSE NULL END, CASE WHEN NULLIF(btrim(q.questionnaire_id), '') IS NULL THEN q.source_row_id ELSE NULL END, q.level25_product_bp_nm)
+  032. history_row_count | bigint | count(*) OVER (PARTITION BY q.questionnaire_rk, CASE WHEN q.questionnaire_rk IS NULL THEN q.questionnaire_id ELSE NULL END, CASE WHEN q.questionnaire_rk IS NULL THEN q.level25_product_bp_nm ELSE NULL END, CASE WHEN NULLIF(btrim(q.questionnaire_id), '') IS NULL THEN q.source_row_id ELSE NULL END, q.level25_product_bp_nm)
+  033. status_count | bigint | count(q.status_cd) OVER (PARTITION BY q.questionnaire_rk, CASE WHEN q.questionnaire_rk IS NULL THEN q.questionnaire_id ELSE NULL END, CASE WHEN q.questionnaire_rk IS NULL THEN q.level25_product_bp_nm ELSE NULL END, CASE WHEN NULLIF(btrim(q.questionnaire_id), '') IS NULL THEN q.source_row_id ELSE NULL END, q.level25_product_bp_nm)
+
+TABLE &db_sbx.prt_qas_questionnaire
+Шаг 1.17. Действующая версия анкеты с RK, верификацией и всеми номерами истории.
+Читает: sbx_pre_orb_fd.prt_tqs_questionnaire_verified
+  001. q_entity_id | bigint | row_number() OVER (ORDER BY q.questionnaire_rk, q.questionnaire_id, q.level25_product_bp_nm, q.source_row_id)
+  002. questionnaire_id | text | q.questionnaire_id
+  003. questionnaire_rk | bigint | q.questionnaire_rk
+  004. rk_mapping_count | bigint | q.rk_mapping_count
+  005. application_num | text | q.application_num
+  006. application_nums | text[] | q.application_nums
+  007. q_src_cd | text | q.src_cd
+  008. raw_src_cd | text | q.raw_src_cd
+  009. src_cd_src | text | q.src_cd
+  010. utmcn | text | q.utmcn_info
+  011. utmcmd | text | q.utmcmd_info
+  012. utmcsr | text | q.utmcsr_info
+  013. utmctr | text | q.utmctr_info
+  014. utmcct | text | q.utmcct_info
+  015. questionnaire_dttm | timestamp | q.questionnaire_dttm
+  016. status_cd | text | q.status_cd
+  017. status_name | text | q.status_name
+  018. scoring_status_nm | text | q.scoring_status_nm
+  019. prescoring_status_nm | text | q.prescoring_status_nm
+  020. product_type_cd | text | q.product_type_cd
+  021. program_type | text | q.program_type
+  022. level25_product_bp_nm | text | q.level25_product_bp_nm
+  023. original_effective_from_dttm_auto_kn | timestamp | q.original_effective_from_dttm_auto_kn
+  024. original_effective_from_dttm_kk_dk | timestamp | q.original_effective_from_dttm_kk_dk
+  025. effective_from_dttm | timestamp | q.effective_from_dttm
+  026. effective_to_dttm | timestamp | q.effective_to_dttm
+  027. status_observed_dttm | timestamp | q.status_observed_dttm
+  028. product_branch | text | q.product_branch
+  029. product_match_flg | integer | 1
+  030. history_row_count | bigint | q.history_row_count
+  031. id_count | integer | CASE WHEN NULLIF(btrim(q.questionnaire_id), '') IS NULL THEN 0 ELSE 1 END
+  032. status_count | bigint | q.status_count
+  033. verification_flg | boolean | q.verification_flg
+
+TABLE &db_sbx.prt_qas_kn_kk_questionnaire
+Шаг 2.1. Анкеты КН/КК с атрибутами, флагом и номерами; фильтр только по level25.
+Читает: sbx_pre_orb_fd.prt_qas_questionnaire
+  001. q_entity_id | bigint | q.q_entity_id
+  002. questionnaire_id | text | q.questionnaire_id
+  003. questionnaire_rk | bigint | q.questionnaire_rk
+  004. rk_mapping_count | bigint | q.rk_mapping_count
+  005. application_num | text | q.application_num
+  006. application_nums | text[] | q.application_nums
+  007. q_src_cd | text | q.q_src_cd
+  008. raw_src_cd | text | q.raw_src_cd
+  009. src_cd_src | text | q.src_cd_src
+  010. utmcn | text | q.utmcn
+  011. utmcmd | text | q.utmcmd
+  012. utmcsr | text | q.utmcsr
+  013. utmctr | text | q.utmctr
+  014. utmcct | text | q.utmcct
+  015. questionnaire_dttm | timestamp | q.questionnaire_dttm
+  016. status_cd | text | q.status_cd
+  017. status_name | text | q.status_name
+  018. scoring_status_nm | text | q.scoring_status_nm
+  019. prescoring_status_nm | text | q.prescoring_status_nm
+  020. product_type_cd | text | q.product_type_cd
+  021. program_type | text | q.program_type
+  022. level25_product_bp_nm | text | q.level25_product_bp_nm
+  023. original_effective_from_dttm_auto_kn | timestamp | q.original_effective_from_dttm_auto_kn
+  024. original_effective_from_dttm_kk_dk | timestamp | q.original_effective_from_dttm_kk_dk
+  025. effective_from_dttm | timestamp | q.effective_from_dttm
+  026. effective_to_dttm | timestamp | q.effective_to_dttm
+  027. status_observed_dttm | timestamp | q.status_observed_dttm
+  028. product_branch | text | q.product_branch
+  029. product_match_flg | integer | q.product_match_flg
+  030. history_row_count | bigint | q.history_row_count
+  031. id_count | integer | q.id_count
+  032. status_count | bigint | q.status_count
+  033. verification_flg | boolean | q.verification_flg
+
+TABLE &db_sbx.prt_qas_kn_kk_bdm_application
+Шаг 2.2. Текущие BDM-заявки продуктовых систем и УЗ.
+Читает: bdm.application
+  001. application_rk | bigint | a.application_rk
+  002. application_num | text | a.application_num
+  003. src_cd | text | a.src_cd
+
+TABLE &db_sbx.prt_qas_kn_kk_tas_raw
+Шаг 2.3. Загрузка TAS: предполагаемый актуальный снимок; -1 -> NULL перед связями.
+Читает: sbx_pre_orb_fd.tech_application_status
+  001. tas_row_id | bigint | row_number() OVER (ORDER BY t.src_cd NULLS FIRST, t.application_rk NULLS FIRST, t.parent_application_rk NULLS FIRST)
+  002. parent_application_rk | bigint | NULLIF(t.parent_application_rk, -1)
+  003. parent_src_cd | text | t.parent_src_cd
+  004. application_rk | bigint | NULLIF(t.application_rk, -1)
+  005. src_cd | text | t.src_cd
+  006. parent_application_id | text | t.parent_application_id
+  007. parent_application_dt | date | t.parent_application_dt
+  008. parent_approved_dttm | timestamp | t.parent_approved_dttm
+  009. application_id | text | t.application_id
+  010. application_dt | date | t.application_dt
+  011. application_type_cd | text | t.application_type_cd
+  012. deal_issue_date | date | t.deal_issue_date
+  013. level25_product_bp_nm | text | t.level25_product_bp_nm
+  014. level35_product_bp_nm | text | t.level35_product_bp_nm
+  015. parent_open_flg | boolean | CAST(t.parent_open_flg AS boolean)
+  016. parent_prescoring_flg | boolean | CAST(t.parent_prescoring_flg AS boolean)
+  017. parent_at_work_flg | boolean | CAST(t.parent_at_work_flg AS boolean)
+  018. parent_approved_flg | boolean | CAST(t.parent_approved_flg AS boolean)
+  019. create_flg | boolean | CAST(t.create_flg AS boolean)
+  020. at_work_flg | boolean | CAST(t.at_work_flg AS boolean)
+  021. final_approved_flg | boolean | CAST(t.final_approved_flg AS boolean)
+  022. agr_signed_flg | boolean | CAST(t.agr_signed_flg AS boolean)
+  023. processed_dttm | timestamp | t.processed_dttm
+  024. product_branch | text | CASE WHEN t.src_cd = 'ALPP' THEN 'AUTO' WHEN t.src_cd = 'MSCL' THEN 'KN' WHEN t.src_cd IN ('CCPP_CRCA', 'CCPP_BATR') THEN 'KK' ELSE 'UZ' END
+
+TABLE &db_sbx.prt_qas_kn_kk_tas
+Шаг 2.4. Сущности TAS: ключ родителя + ребёнка; конфликты атрибутов не выбираем произвольно.
+Читает: sbx_pre_orb_fd.prt_qas_kn_kk_tas_raw
+  001. app_entity_id | bigint | row_number() OVER (ORDER BY g.src_cd NULLS FIRST, g.application_rk NULLS FIRST, g.parent_src_cd NULLS FIRST, g.parent_application_rk NULLS FIRST, g.invalid_row_group NULLS FIRST)
+  002. parent_application_rk | bigint | g.parent_application_rk
+  003. parent_src_cd | text | g.parent_src_cd
+  004. application_rk | bigint | g.application_rk
+  005. src_cd | text | g.src_cd
+  006. parent_application_id | text | g.parent_application_id
+  007. parent_application_dt | date | g.parent_application_dt
+  008. parent_approved_dttm | timestamp | g.parent_approved_dttm
+  009. application_id | text | g.application_id
+  010. application_dt | date | g.application_dt
+  011. application_type_cd | text | g.application_type_cd
+  012. deal_issue_date | date | g.deal_issue_date
+  013. level25_product_bp_nm | text | g.level25_product_bp_nm
+  014. level35_product_bp_nm | text | g.level35_product_bp_nm
+  015. parent_open_flg | boolean | g.parent_open_flg
+  016. parent_prescoring_flg | boolean | g.parent_prescoring_flg
+  017. parent_at_work_flg | boolean | g.parent_at_work_flg
+  018. parent_approved_flg | boolean | g.parent_approved_flg
+  019. create_flg | boolean | g.create_flg
+  020. at_work_flg | boolean | g.at_work_flg
+  021. final_approved_flg | boolean | g.final_approved_flg
+  022. agr_signed_flg | boolean | g.agr_signed_flg
+  023. product_branch | text | g.product_branch
+  024. tas_row_count | bigint | g.tas_row_count
+  025. payload_variant_count | bigint | g.payload_variant_count
+  026. application_id_count | bigint | g.application_id_count
+  027. max_processed_dttm | timestamp | g.max_processed_dttm
+  028. tas_entity_type | text | CASE WHEN g.application_rk IS NOT NULL THEN 'APPLICATION' WHEN g.parent_application_rk IS NOT NULL AND g.parent_src_cd = 'MSSA' AND g.src_cd IS NULL THEN 'UZ_ONLY' ELSE 'INVALID_KEYS' END
+
+TABLE &db_sbx.prt_qas_kn_kk_questionnaire_bdm
+Шаг 2.5. Каждый application_num подготовленной анкеты -> BDM application_rk.
+Читает: sbx_pre_orb_fd.prt_qas_kn_kk_bdm_application, sbx_pre_orb_fd.prt_qas_kn_kk_questionnaire
+  001. q_entity_id | bigint | q.q_entity_id
+  002. product_branch | text | q.product_branch
+  003. application_num | text | n.application_num
+  004. application_rk | bigint | a.application_rk
+  005. src_cd | text | a.src_cd
+
+TABLE &db_sbx.prt_qas_kn_kk_link_candidates
+Шаг 2.6. Кандидаты: прямой путь, родитель УЗ, УЗ без ребёнка, собственный ключ УЗ.
+Читает: sbx_pre_orb_fd.prt_qas_kn_kk_questionnaire_bdm, sbx_pre_orb_fd.prt_qas_kn_kk_tas
+  001. product_branch | text | b.product_branch
+  002. q_entity_id | bigint | b.q_entity_id
+  003. app_entity_id | bigint | t.app_entity_id
+  004. link_route | text | CAST('DIRECT_PRODUCT' AS text)
+
+TABLE &db_sbx.prt_qas_kn_kk_link_quality
+Шаг 2.7. Сравнение путей: уникальные сущности, покрытие и N:M. UZ_ONLY — отдельная цель.
+Читает: sbx_pre_orb_fd.prt_qas_kn_kk_questionnaire, sbx_pre_orb_fd.prt_qas_kn_kk_link_candidates, sbx_pre_orb_fd.prt_qas_kn_kk_tas
+  001. product_branch | text | b.product_branch
+  002. link_route | text | r.link_route
+  003. q_total | bigint | COALESCE(q.q_total, 0)
+  004. q_matched | bigint | COALESCE(m.q_matched, 0)
+  005. q_coverage_pct | numeric | round(100.0 * COALESCE(m.q_matched, 0) / NULLIF(q.q_total, 0), 2)
+  006. app_total | bigint | t.app_total
+  007. app_matched | bigint | COALESCE(a.app_matched, 0)
+  008. app_coverage_pct | numeric | round(100.0 * COALESCE(a.app_matched, 0) / NULLIF(t.app_total, 0), 2)
+  009. pair_count | bigint | COALESCE(p.pair_count, 0)
+  010. q_with_many_apps | bigint | COALESCE(m.q_with_many_apps, 0)
+  011. apps_with_many_q | bigint | COALESCE(a.apps_with_many_q, 0)
+  012. many_to_many_pairs | bigint | COALESCE(p.many_to_many_pairs, 0)
+
+TABLE &db_sbx.prt_qas_kn_kk_links
+Шаг 2.8. Выбор режима и одна строка на пару; сохраняем все обнаружившие её пути.
+Читает: sbx_pre_orb_fd.prt_qas_kn_kk_link_candidates
+  001. q_entity_id | bigint | d.q_entity_id
+  002. app_entity_id | bigint | d.app_entity_id
+  003. link_routes | text | d.link_routes
+  004. q_link_count | bigint | count(*) OVER (PARTITION BY d.q_entity_id)
+  005. app_link_count | bigint | count(*) OVER (PARTITION BY d.app_entity_id)
+
+TABLE &db_sbx.prt_qas_kn_kk_fin
+Шаг 2.9. Ветка целиком: связанные пары + анкеты без пары + все строки TAS без пары.
+Читает: sbx_pre_orb_fd.prt_qas_kn_kk_tas, sbx_pre_orb_fd.prt_qas_kn_kk_questionnaire, sbx_pre_orb_fd.prt_qas_kn_kk_links
+  001. product_branch | text | COALESCE(q.product_branch, t.product_branch)
+  002. record_type | text | CAST(CASE WHEN q.q_entity_id IS NULL THEN 'APPLICATION_ONLY' WHEN t.app_entity_id IS NULL THEN 'QUESTIONNAIRE_ONLY' ELSE 'MATCHED' END AS text)
+  003. link_routes | text | l.link_routes
+  004. link_cardinality | text | CAST(CASE WHEN l.q_entity_id IS NULL THEN 'NO_LINK' WHEN l.q_link_count > 1 AND l.app_link_count > 1 THEN 'N:M' WHEN l.q_link_count > 1 THEN '1:N' WHEN l.app_link_count > 1 THEN 'N:1' ELSE '1:1' END AS text)
+  005. q_link_count | bigint | l.q_link_count
+  006. app_link_count | bigint | l.app_link_count
+  007. q_entity_id | bigint | q.q_entity_id
+  008. q_questionnaire_id | text | q.questionnaire_id
+  009. q_questionnaire_rk | bigint | q.questionnaire_rk
+  010. q_rk_mapping_count | bigint | q.rk_mapping_count
+  011. q_raw_src_cd | text | q.raw_src_cd
+  012. q_effective_to_dttm | timestamp | q.effective_to_dttm
+  013. q_application_num | text | q.application_num
+  014. q_application_nums | text[] | q.application_nums
+  015. q_src_cd_src | text | q.src_cd_src
+  016. q_utmcn | text | q.utmcn
+  017. q_utmcmd | text | q.utmcmd
+  018. q_utmcsr | text | q.utmcsr
+  019. q_utmctr | text | q.utmctr
+  020. q_utmcct | text | q.utmcct
+  021. q_scoring_status_nm | text | q.scoring_status_nm
+  022. q_prescoring_status_nm | text | q.prescoring_status_nm
+  023. q_original_effective_from_dttm_auto_kn | timestamp | q.original_effective_from_dttm_auto_kn
+  024. q_original_effective_from_dttm_kk_dk | timestamp | q.original_effective_from_dttm_kk_dk
+  025. q_effective_from_dttm | timestamp | q.effective_from_dttm
+  026. q_status_observed_dttm | timestamp | q.status_observed_dttm
+  027. q_src_cd | text | q.q_src_cd
+  028. q_questionnaire_dttm | timestamp | q.questionnaire_dttm
+  029. q_status_cd | text | q.status_cd
+  030. q_status_name | text | q.status_name
+  031. q_product_type_cd | text | q.product_type_cd
+  032. q_program_type | text | q.program_type
+  033. q_level25_product_bp_nm | text | q.level25_product_bp_nm
+  034. q_product_match_flg | integer | q.product_match_flg
+  035. q_history_row_count | bigint | q.history_row_count
+  036. q_id_count | integer | q.id_count
+  037. q_status_count | bigint | q.status_count
+  038. verification_flg | boolean | q.verification_flg
+  039. tas_entity_id | text | CASE WHEN t.app_entity_id IS NOT NULL THEN 'KN_KK:' || CAST(t.app_entity_id AS text) ELSE NULL END
+  040. tas_parent_application_rk | bigint | t.parent_application_rk
+  041. tas_parent_src_cd | text | t.parent_src_cd
+  042. tas_application_rk | bigint | t.application_rk
+  043. tas_src_cd | text | t.src_cd
+  044. tas_parent_application_id | text | t.parent_application_id
+  045. tas_parent_application_dt | date | t.parent_application_dt
+  046. tas_parent_approved_dttm | timestamp | t.parent_approved_dttm
+  047. tas_application_id | text | t.application_id
+  048. tas_application_dt | date | t.application_dt
+  049. tas_application_type_cd | text | t.application_type_cd
+  050. tas_deal_issue_date | date | t.deal_issue_date
+  051. tas_level25_product_bp_nm | text | t.level25_product_bp_nm
+  052. tas_level35_product_bp_nm | text | t.level35_product_bp_nm
+  053. tas_parent_open_flg | boolean | t.parent_open_flg
+  054. tas_parent_prescoring_flg | boolean | t.parent_prescoring_flg
+  055. tas_parent_at_work_flg | boolean | t.parent_at_work_flg
+  056. tas_parent_approved_flg | boolean | t.parent_approved_flg
+  057. tas_create_flg | boolean | t.create_flg
+  058. tas_at_work_flg | boolean | t.at_work_flg
+  059. tas_final_approved_flg | boolean | t.final_approved_flg
+  060. tas_agr_signed_flg | boolean | t.agr_signed_flg
+  061. tas_entity_type | text | t.tas_entity_type
+  062. tas_row_count | bigint | t.tas_row_count
+  063. tas_payload_variant_count | bigint | t.payload_variant_count
+  064. tas_max_processed_dttm | timestamp | t.max_processed_dttm
+
+TABLE &db_sbx.prt_qas_auto_questionnaire
+Шаг 3.0. Анкеты авто — продолжение общей подготовленной цепочки, фильтр по level25.
+Читает: sbx_pre_orb_fd.prt_qas_questionnaire
+  001. q_entity_id | bigint | q.q_entity_id
+  002. questionnaire_id | text | q.questionnaire_id
+  003. questionnaire_rk | bigint | q.questionnaire_rk
+  004. rk_mapping_count | bigint | q.rk_mapping_count
+  005. application_num | text | q.application_num
+  006. application_nums | text[] | q.application_nums
+  007. q_src_cd | text | q.q_src_cd
+  008. raw_src_cd | text | q.raw_src_cd
+  009. src_cd_src | text | q.src_cd_src
+  010. utmcn | text | q.utmcn
+  011. utmcmd | text | q.utmcmd
+  012. utmcsr | text | q.utmcsr
+  013. utmctr | text | q.utmctr
+  014. utmcct | text | q.utmcct
+  015. questionnaire_dttm | timestamp | q.questionnaire_dttm
+  016. status_cd | text | q.status_cd
+  017. status_name | text | q.status_name
+  018. scoring_status_nm | text | q.scoring_status_nm
+  019. prescoring_status_nm | text | q.prescoring_status_nm
+  020. product_type_cd | text | q.product_type_cd
+  021. program_type | text | q.program_type
+  022. level25_product_bp_nm | text | q.level25_product_bp_nm
+  023. original_effective_from_dttm_auto_kn | timestamp | q.original_effective_from_dttm_auto_kn
+  024. original_effective_from_dttm_kk_dk | timestamp | q.original_effective_from_dttm_kk_dk
+  025. effective_from_dttm | timestamp | q.effective_from_dttm
+  026. effective_to_dttm | timestamp | q.effective_to_dttm
+  027. status_observed_dttm | timestamp | q.status_observed_dttm
+  028. product_branch | text | q.product_branch
+  029. product_match_flg | integer | q.product_match_flg
+  030. history_row_count | bigint | q.history_row_count
+  031. id_count | integer | q.id_count
+  032. status_count | bigint | q.status_count
+  033. verification_flg | boolean | q.verification_flg
+
+TABLE &db_sbx.prt_qas_auto_tas_raw
+Шаг 3.1. Загрузка TAS: предполагаемый актуальный снимок; -1 -> NULL перед связями.
+Читает: sbx_pre_orb_fd.tech_application_status
+  001. tas_row_id | bigint | row_number() OVER (ORDER BY t.src_cd NULLS FIRST, t.application_rk NULLS FIRST, t.parent_application_rk NULLS FIRST)
+  002. parent_application_rk | bigint | NULLIF(t.parent_application_rk, -1)
+  003. parent_src_cd | text | t.parent_src_cd
+  004. application_rk | bigint | NULLIF(t.application_rk, -1)
+  005. src_cd | text | t.src_cd
+  006. parent_application_id | text | t.parent_application_id
+  007. parent_application_dt | date | t.parent_application_dt
+  008. parent_approved_dttm | timestamp | t.parent_approved_dttm
+  009. application_id | text | t.application_id
+  010. application_dt | date | t.application_dt
+  011. application_type_cd | text | t.application_type_cd
+  012. deal_issue_date | date | t.deal_issue_date
+  013. level25_product_bp_nm | text | t.level25_product_bp_nm
+  014. level35_product_bp_nm | text | t.level35_product_bp_nm
+  015. parent_open_flg | boolean | CAST(t.parent_open_flg AS boolean)
+  016. parent_prescoring_flg | boolean | CAST(t.parent_prescoring_flg AS boolean)
+  017. parent_at_work_flg | boolean | CAST(t.parent_at_work_flg AS boolean)
+  018. parent_approved_flg | boolean | CAST(t.parent_approved_flg AS boolean)
+  019. create_flg | boolean | CAST(t.create_flg AS boolean)
+  020. at_work_flg | boolean | CAST(t.at_work_flg AS boolean)
+  021. final_approved_flg | boolean | CAST(t.final_approved_flg AS boolean)
+  022. agr_signed_flg | boolean | CAST(t.agr_signed_flg AS boolean)
+  023. processed_dttm | timestamp | t.processed_dttm
+  024. product_branch | text | CASE WHEN t.src_cd = 'ALPP' THEN 'AUTO' WHEN t.src_cd = 'MSCL' THEN 'KN' WHEN t.src_cd IN ('CCPP_CRCA', 'CCPP_BATR') THEN 'KK' ELSE 'UZ' END
+
+TABLE &db_sbx.prt_qas_auto_tas
+Шаг 3.2. Сущности TAS: ключ родителя + ребёнка; конфликты атрибутов не выбираем произвольно.
+Читает: sbx_pre_orb_fd.prt_qas_auto_tas_raw
+  001. app_entity_id | bigint | row_number() OVER (ORDER BY g.src_cd NULLS FIRST, g.application_rk NULLS FIRST, g.parent_src_cd NULLS FIRST, g.parent_application_rk NULLS FIRST, g.invalid_row_group NULLS FIRST)
+  002. parent_application_rk | bigint | g.parent_application_rk
+  003. parent_src_cd | text | g.parent_src_cd
+  004. application_rk | bigint | g.application_rk
+  005. src_cd | text | g.src_cd
+  006. parent_application_id | text | g.parent_application_id
+  007. parent_application_dt | date | g.parent_application_dt
+  008. parent_approved_dttm | timestamp | g.parent_approved_dttm
+  009. application_id | text | g.application_id
+  010. application_dt | date | g.application_dt
+  011. application_type_cd | text | g.application_type_cd
+  012. deal_issue_date | date | g.deal_issue_date
+  013. level25_product_bp_nm | text | g.level25_product_bp_nm
+  014. level35_product_bp_nm | text | g.level35_product_bp_nm
+  015. parent_open_flg | boolean | g.parent_open_flg
+  016. parent_prescoring_flg | boolean | g.parent_prescoring_flg
+  017. parent_at_work_flg | boolean | g.parent_at_work_flg
+  018. parent_approved_flg | boolean | g.parent_approved_flg
+  019. create_flg | boolean | g.create_flg
+  020. at_work_flg | boolean | g.at_work_flg
+  021. final_approved_flg | boolean | g.final_approved_flg
+  022. agr_signed_flg | boolean | g.agr_signed_flg
+  023. product_branch | text | g.product_branch
+  024. tas_row_count | bigint | g.tas_row_count
+  025. payload_variant_count | bigint | g.payload_variant_count
+  026. application_id_count | bigint | g.application_id_count
+  027. max_processed_dttm | timestamp | g.max_processed_dttm
+  028. tas_entity_type | text | CASE WHEN g.application_rk IS NOT NULL THEN 'APPLICATION' WHEN g.parent_application_rk IS NOT NULL AND g.parent_src_cd = 'MSSA' AND g.src_cd IS NULL THEN 'UZ_ONLY' ELSE 'INVALID_KEYS' END
+
+TABLE &db_sbx.prt_qas_auto_links
+Шаг 3.3. Подготовленные анкеты авто -> TAS по questionnaire_id = application_id.
+Читает: sbx_pre_orb_fd.prt_qas_auto_questionnaire, sbx_pre_orb_fd.prt_qas_auto_tas
+  001. q_entity_id | bigint | d.q_entity_id
+  002. app_entity_id | bigint | d.app_entity_id
+  003. link_routes | text | CAST('AUTO_ID' AS text)
+  004. q_link_count | bigint | count(*) OVER (PARTITION BY d.q_entity_id)
+  005. app_link_count | bigint | count(*) OVER (PARTITION BY d.app_entity_id)
+
+TABLE &db_sbx.prt_qas_auto_fin
+Шаг 3.4. Ветка целиком: связанные пары + анкеты без пары + все строки TAS без пары.
+Читает: sbx_pre_orb_fd.prt_qas_auto_tas, sbx_pre_orb_fd.prt_qas_auto_questionnaire, sbx_pre_orb_fd.prt_qas_auto_links
+  001. product_branch | text | COALESCE(q.product_branch, t.product_branch)
+  002. record_type | text | CAST(CASE WHEN q.q_entity_id IS NULL THEN 'APPLICATION_ONLY' WHEN t.app_entity_id IS NULL THEN 'QUESTIONNAIRE_ONLY' ELSE 'MATCHED' END AS text)
+  003. link_routes | text | l.link_routes
+  004. link_cardinality | text | CAST(CASE WHEN l.q_entity_id IS NULL THEN 'NO_LINK' WHEN l.q_link_count > 1 AND l.app_link_count > 1 THEN 'N:M' WHEN l.q_link_count > 1 THEN '1:N' WHEN l.app_link_count > 1 THEN 'N:1' ELSE '1:1' END AS text)
+  005. q_link_count | bigint | l.q_link_count
+  006. app_link_count | bigint | l.app_link_count
+  007. q_entity_id | bigint | q.q_entity_id
+  008. q_questionnaire_id | text | q.questionnaire_id
+  009. q_questionnaire_rk | bigint | q.questionnaire_rk
+  010. q_rk_mapping_count | bigint | q.rk_mapping_count
+  011. q_raw_src_cd | text | q.raw_src_cd
+  012. q_effective_to_dttm | timestamp | q.effective_to_dttm
+  013. q_application_num | text | q.application_num
+  014. q_application_nums | text[] | q.application_nums
+  015. q_src_cd_src | text | q.src_cd_src
+  016. q_utmcn | text | q.utmcn
+  017. q_utmcmd | text | q.utmcmd
+  018. q_utmcsr | text | q.utmcsr
+  019. q_utmctr | text | q.utmctr
+  020. q_utmcct | text | q.utmcct
+  021. q_scoring_status_nm | text | q.scoring_status_nm
+  022. q_prescoring_status_nm | text | q.prescoring_status_nm
+  023. q_original_effective_from_dttm_auto_kn | timestamp | q.original_effective_from_dttm_auto_kn
+  024. q_original_effective_from_dttm_kk_dk | timestamp | q.original_effective_from_dttm_kk_dk
+  025. q_effective_from_dttm | timestamp | q.effective_from_dttm
+  026. q_status_observed_dttm | timestamp | q.status_observed_dttm
+  027. q_src_cd | text | q.q_src_cd
+  028. q_questionnaire_dttm | timestamp | q.questionnaire_dttm
+  029. q_status_cd | text | q.status_cd
+  030. q_status_name | text | q.status_name
+  031. q_product_type_cd | text | q.product_type_cd
+  032. q_program_type | text | q.program_type
+  033. q_level25_product_bp_nm | text | q.level25_product_bp_nm
+  034. q_product_match_flg | integer | q.product_match_flg
+  035. q_history_row_count | bigint | q.history_row_count
+  036. q_id_count | integer | q.id_count
+  037. q_status_count | bigint | q.status_count
+  038. verification_flg | boolean | q.verification_flg
+  039. tas_entity_id | text | CASE WHEN t.app_entity_id IS NOT NULL THEN 'AUTO:' || CAST(t.app_entity_id AS text) ELSE NULL END
+  040. tas_parent_application_rk | bigint | t.parent_application_rk
+  041. tas_parent_src_cd | text | t.parent_src_cd
+  042. tas_application_rk | bigint | t.application_rk
+  043. tas_src_cd | text | t.src_cd
+  044. tas_parent_application_id | text | t.parent_application_id
+  045. tas_parent_application_dt | date | t.parent_application_dt
+  046. tas_parent_approved_dttm | timestamp | t.parent_approved_dttm
+  047. tas_application_id | text | t.application_id
+  048. tas_application_dt | date | t.application_dt
+  049. tas_application_type_cd | text | t.application_type_cd
+  050. tas_deal_issue_date | date | t.deal_issue_date
+  051. tas_level25_product_bp_nm | text | t.level25_product_bp_nm
+  052. tas_level35_product_bp_nm | text | t.level35_product_bp_nm
+  053. tas_parent_open_flg | boolean | t.parent_open_flg
+  054. tas_parent_prescoring_flg | boolean | t.parent_prescoring_flg
+  055. tas_parent_at_work_flg | boolean | t.parent_at_work_flg
+  056. tas_parent_approved_flg | boolean | t.parent_approved_flg
+  057. tas_create_flg | boolean | t.create_flg
+  058. tas_at_work_flg | boolean | t.at_work_flg
+  059. tas_final_approved_flg | boolean | t.final_approved_flg
+  060. tas_agr_signed_flg | boolean | t.agr_signed_flg
+  061. tas_entity_type | text | t.tas_entity_type
+  062. tas_row_count | bigint | t.tas_row_count
+  063. tas_payload_variant_count | bigint | t.payload_variant_count
+  064. tas_max_processed_dttm | timestamp | t.max_processed_dttm
+
+TABLE &db_sbx.prt_qas_funnel_detail
+Шаг 4.1. Полный результат связей: все атрибуты и диагностика остаются в detail.
+Читает: sbx_pre_orb_fd.prt_qas_kn_kk_fin, sbx_pre_orb_fd.prt_qas_auto_fin
+  001. product_branch | text | product_branch
+  002. record_type | text | record_type
+  003. link_routes | text | link_routes
+  004. link_cardinality | text | link_cardinality
+  005. q_link_count | bigint | q_link_count
+  006. app_link_count | bigint | app_link_count
+  007. q_entity_id | bigint | q_entity_id
+  008. q_questionnaire_id | text | q_questionnaire_id
+  009. q_questionnaire_rk | bigint | q_questionnaire_rk
+  010. q_rk_mapping_count | bigint | q_rk_mapping_count
+  011. q_raw_src_cd | text | q_raw_src_cd
+  012. q_effective_to_dttm | timestamp | q_effective_to_dttm
+  013. q_application_num | text | q_application_num
+  014. q_application_nums | text[] | q_application_nums
+  015. q_src_cd_src | text | q_src_cd_src
+  016. q_utmcn | text | q_utmcn
+  017. q_utmcmd | text | q_utmcmd
+  018. q_utmcsr | text | q_utmcsr
+  019. q_utmctr | text | q_utmctr
+  020. q_utmcct | text | q_utmcct
+  021. q_scoring_status_nm | text | q_scoring_status_nm
+  022. q_prescoring_status_nm | text | q_prescoring_status_nm
+  023. q_original_effective_from_dttm_auto_kn | timestamp | q_original_effective_from_dttm_auto_kn
+  024. q_original_effective_from_dttm_kk_dk | timestamp | q_original_effective_from_dttm_kk_dk
+  025. q_effective_from_dttm | timestamp | q_effective_from_dttm
+  026. q_status_observed_dttm | timestamp | q_status_observed_dttm
+  027. q_src_cd | text | q_src_cd
+  028. q_questionnaire_dttm | timestamp | q_questionnaire_dttm
+  029. q_status_cd | text | q_status_cd
+  030. q_status_name | text | q_status_name
+  031. q_product_type_cd | text | q_product_type_cd
+  032. q_program_type | text | q_program_type
+  033. q_level25_product_bp_nm | text | q_level25_product_bp_nm
+  034. q_product_match_flg | integer | q_product_match_flg
+  035. q_history_row_count | bigint | q_history_row_count
+  036. q_id_count | integer | q_id_count
+  037. q_status_count | bigint | q_status_count
+  038. verification_flg | boolean | verification_flg
+  039. tas_entity_id | text | tas_entity_id
+  040. tas_parent_application_rk | bigint | tas_parent_application_rk
+  041. tas_parent_src_cd | text | tas_parent_src_cd
+  042. tas_application_rk | bigint | tas_application_rk
+  043. tas_src_cd | text | tas_src_cd
+  044. tas_parent_application_id | text | tas_parent_application_id
+  045. tas_parent_application_dt | date | tas_parent_application_dt
+  046. tas_parent_approved_dttm | timestamp | tas_parent_approved_dttm
+  047. tas_application_id | text | tas_application_id
+  048. tas_application_dt | date | tas_application_dt
+  049. tas_application_type_cd | text | tas_application_type_cd
+  050. tas_deal_issue_date | date | tas_deal_issue_date
+  051. tas_level25_product_bp_nm | text | tas_level25_product_bp_nm
+  052. tas_level35_product_bp_nm | text | tas_level35_product_bp_nm
+  053. tas_parent_open_flg | boolean | tas_parent_open_flg
+  054. tas_parent_prescoring_flg | boolean | tas_parent_prescoring_flg
+  055. tas_parent_at_work_flg | boolean | tas_parent_at_work_flg
+  056. tas_parent_approved_flg | boolean | tas_parent_approved_flg
+  057. tas_create_flg | boolean | tas_create_flg
+  058. tas_at_work_flg | boolean | tas_at_work_flg
+  059. tas_final_approved_flg | boolean | tas_final_approved_flg
+  060. tas_agr_signed_flg | boolean | tas_agr_signed_flg
+  061. tas_entity_type | text | tas_entity_type
+  062. tas_row_count | bigint | tas_row_count
+  063. tas_payload_variant_count | bigint | tas_payload_variant_count
+  064. tas_max_processed_dttm | timestamp | tas_max_processed_dttm
+  065. report_dttm | timestamp | CAST(&p_report_timestamp AS timestamp)
+
+TABLE &db_sbx.prt_tech_internet_funnel
+Шаг 4.2. Целевая tech_internet_funnel: ровно 19 бизнес-атрибутов, явные типы.
+Читает: sbx_pre_orb_fd.prt_qas_funnel_detail
+  001. questionnaire_rk | bigint | CAST(q_questionnaire_rk AS bigint)
+  002. questionnaire_dttm | timestamp | CAST(q_questionnaire_dttm AS timestamp)
+  003. quest_verification_flg | boolean | CAST(verification_flg AS boolean)
+  004. parent_application_rk | bigint | CAST(tas_parent_application_rk AS bigint)
+  005. parent_application_dt | date | CAST(tas_parent_application_dt AS date)
+  006. parent_open_flg | boolean | CAST(tas_parent_open_flg AS boolean)
+  007. parent_prescoring_flg | boolean | CAST(tas_parent_prescoring_flg AS boolean)
+  008. parent_at_work_flg | boolean | CAST(tas_parent_at_work_flg AS boolean)
+  009. parent_approved_flg | boolean | CAST(tas_parent_approved_flg AS boolean)
+  010. application_rk | bigint | CAST(tas_application_rk AS bigint)
+  011. application_dt | date | CAST(tas_application_dt AS date)
+  012. deal_issue_date | date | CAST(tas_deal_issue_date AS date)
+  013. create_flg | boolean | CAST(tas_create_flg AS boolean)
+  014. at_work_flg | boolean | CAST(tas_at_work_flg AS boolean)
+  015. final_approved_flg | boolean | CAST(tas_final_approved_flg AS boolean)
+  016. agr_signed_flg | boolean | CAST(tas_agr_signed_flg AS boolean)
+  017. level25_product_bp_nm | text | CAST(COALESCE(tas_level25_product_bp_nm, q_level25_product_bp_nm) AS text)
+  018. level35_product_bp_nm | text | CAST(tas_level35_product_bp_nm AS text)
+  019. processed_dttm | timestamp(0) | CAST(&p_report_timestamp AS timestamp(0))
+
+TABLE &db_sbx.prt_qas_coverage
+Шаг 4.3. Покрытие уникальных сущностей по веткам и общей базе; строки пары не знаменатель.
+Читает: sbx_pre_orb_fd.prt_qas_funnel_detail
+  001. product_branch | text | t.product_branch
+  002. q_total | bigint | t.q_total
+  003. q_matched | bigint | t.q_matched
+  004. q_coverage_pct | numeric | round(100.0 * t.q_matched / NULLIF(t.q_total, 0), 2)
+  005. app_total | bigint | t.app_total
+  006. app_matched | bigint | t.app_matched
+  007. app_coverage_pct | numeric | round(100.0 * t.app_matched / NULLIF(t.app_total, 0), 2)
+  008. entity_coverage_pct | numeric | round(100.0 * (t.q_matched + t.app_matched) / NULLIF(t.q_total + t.app_total, 0), 2)
+  009. reference_coverage_pct | numeric | CAST(10.0 AS numeric)
+
+TABLE &db_sbx.prt_qas_checks
+Шаг 4.4. Контроли сохранности/уникальности. Все error_count должны быть 0.
+Читает: sbx_pre_orb_fd.prt_qas_funnel_detail, sbx_pre_orb_fd.prt_qas_auto_tas, sbx_pre_orb_fd.prt_qas_questionnaire, sbx_pre_orb_fd.prt_tech_internet_funnel, sbx_pre_orb_fd.prt_qas_kn_kk_tas
+  001. check_name | text | CAST('MISSING_QUESTIONNAIRES' AS text)
+  002. error_count | bigint | count(*)
+
+5. ЧТО ЕЩЁ НУЖНО ПОЛУЧИТЬ И ГДЕ
+-------------------------------
+A. Если tech_questionnaire_rk — отдельный скрипт, нужен путь к нему в репозитории
+либо скриншоты его чтений/генерации RK. На имеющихся изображениях показано
+потребление уже созданного RK из tech_questionnaire_x_customer. Генератор RK
+не восстанавливается из row_number; прототип его не подменяет.
+
+Если один RK связан с несколькими ID, исходный LEAD строит общую историю
+по RK; в текущий срез попадёт действующая версия ID. Исторические ID остаются
+в prt_qas_tech_questionnaire_status, номера и флаг объединяются по RK/продукту.
+Такие связи показывает отчёт 4.17. Для авто используется равенство текущего
+questionnaire_id и application_id; при ненулевом отчёте 4.17 нужно подтвердить
+кардинальность и смысл связей в исходном tech_questionnaire_x_customer.
+
+B. Для полного каталога связи анкета–клиент: DBeaver -> схема dm_pik_fd_cdmr ->
+tech_questionnaire_x_customer -> Columns и DDL. Нужны весь список столбцов,
+типы, ключи и правила актуальности. Скриншоты подходят, копировать код не нужно.
+Для BDM на той же вкладке уточнить 3 обрезанных длинных имени.
+
+C. Для level35 у анкеты без TAS нужен утверждённый справочник/SQL из ETL TAS,
+где формируется level35_product_bp_nm: таблицы, поля связи и период действия.
+На присланных скриншотах в TQS есть только level25. Пока level35 = NULL,
+level25 берётся из TQS. Если для совпавшей пары приоритет должен быть у
+продукта анкеты, а не у TAS, требуется это бизнес-правило; сейчас TAS первый,
+оба значения и конфликт сохранены в detail.
+
+D. Для актуальности TAS: Columns/DDL и последняя выборка её ETL, чтобы подтвердить
+актуальный снимок или назвать реальный effective_to-фильтр. По processed_dttm
+актуальность не угадывается. Для выбора DIRECT/UZ нужны результаты отчёта 2.7,
+для покрытия >=10% — отчёт 4.5 на реальных данных.
+
+E. Показанная исходная формула сдвига использует EXTRACT(SECONDS), который
+возвращает компонент секунд (61 секунда -> 1), а не полную длительность.
+Скрипт сохраняет это поведение для сопоставимости; отчёт 4.14 показывает
+затронутые строки и неположительные интервалы. При ненулевом результате
+сравнить эти строки с оригинальным ETL перед изменением формулы.
+
+Готовые read-only запросы для получения метаданных (либо открыть Columns):
+
+select table_schema, table_name, ordinal_position, column_name, data_type,
+       character_maximum_length, numeric_precision, numeric_scale, datetime_precision
+from information_schema.columns
+where (table_schema, table_name) in (
+    ('rd_raw_orb', 'v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention'),
+    ('bdm', 'application'),
+    ('dm_pik_fd_cdmr', 'tech_questionnaire_x_customer'),
+    ('sbx_pre_orb_fd', 'tech_application_status')
+)
+order by table_schema, table_name, ordinal_position;
+
+select table_schema, table_name, ordinal_position, column_name, data_type,
+       numeric_precision, numeric_scale, datetime_precision
+from information_schema.columns
+where table_schema = 'sbx_pre_orb_fd'
+  and (table_name like 'prt_tqs_%' or table_name like 'prt_qas_%'
+       or table_name = 'prt_tech_internet_funnel')
+order by table_name, ordinal_position;
+
+Локальная проверка не подтверждает банковские данные/Greenplum. Финальная
+проекция, сохранность строк и всех исходных TQS-полей проверяются автоматически
+на синтетических данных; реальные метаданные подтвердит запрос выше.
