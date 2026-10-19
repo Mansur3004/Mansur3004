@@ -12,9 +12,12 @@ import validate_combined as old
 ROOT=Path(__file__).resolve().parents[1]
 SCRIPT=ROOT/'sql/build_internet_funnel_v2.sql'
 S=old.S
+CDMR='dm_pik_fd_cdmr'
 FINAL=f'{S}.prt_if2_tech_internet_funnel'
 MACROS=old.TEST_MACROS | {
-    'p_db_tqs':S,'p_db_tas':S,
+    'p_quest_25lvl_product_kn_list':"'Потребкредит'",
+    'p_quest_25lvl_product_kk_list':"'Кредитные карты'",
+    'p_quest_25lvl_product_auto_list':"'Автокредит'",
     'P_UZ_SRC':"'MSSA'",'P_KN_SRC':"'MSCL'",'P_KK_SRC':"'CCPP_CRCA', 'CCPP_BATR'",'P_AUTO_SRC':"'ALPP'",
 }
 FINAL_FIELDS='questionnaire_rk questionnaire_dttm quest_verification_flg parent_application_rk parent_application_dt parent_open_flg parent_prescoring_flg parent_at_work_flg parent_approved_flg application_rk application_dt deal_issue_date create_flg at_work_flg final_approved_flg agr_signed_flg level25_product_bp_nm level35_product_bp_nm processed_dttm'.split()
@@ -35,13 +38,26 @@ def execution_sql(overrides=None):
 
 def db_new():
     db=old.make_db()
-    db.execute(f'''create table {S}.tech_questionnaire_status (
+    tas_columns=', '.join(c[0] for c in db.execute(f'describe {S}.tech_application_status').fetchall())
+    db.execute(f'create table {CDMR}.tech_application_status as select {tas_columns} from {S}.tech_application_status')
+    db.execute(f'drop table {S}.tech_application_status')
+    db.execute(f'''create table {CDMR}.tech_questionnaire_status (
         questionnaire_id text,questionnaire_rk bigint,questionnaire_dttm timestamp,
         utmcn_info text,utmcmd_info text,utmcsr_info text,utmctr_info text,utmcct_info text,
         status_cd text,scoring_status_nm text,prescoring_status_nm text,product_type_cd text,
         status_name text,program_type text,src_cd text,level25_product_bp_nm text,
         effective_from_dttm timestamp,effective_to_dttm timestamp,processed_dttm timestamp)''')
     return db
+
+def add_tas(db,rk,app_id,src,parent=-1,parent_src='MSSA',**overrides):
+    record=dict(parent_application_rk=parent,parent_src_cd=parent_src,application_rk=rk,src_cd=src,
+        parent_application_id=f'P{parent}',parent_application_dt='2025-01-01',parent_approved_dttm=None,
+        application_id=app_id,application_dt=None if rk==-1 else '2025-02-01',
+        application_type_cd='TEST',deal_issue_date=None,level25_product_bp_nm='TEST',level35_product_bp_nm='TEST',
+        parent_open_flg=True,parent_prescoring_flg=True,parent_at_work_flg=True,parent_approved_flg=True,
+        create_flg=True,at_work_flg=False,final_approved_flg=False,agr_signed_flg=False,processed_dttm='2025-02-02')
+    record.update(overrides)
+    db.execute(f"insert into {CDMR}.tech_application_status ({', '.join(record)}) values ({', '.join('?' for _ in record)})",list(record.values()))
 
 def mapped_raw(db,qid,rk,code='KN',status='DRAFT',num=None,**kw):
     old.add_raw(db,qid,code,status,num,**kw)
@@ -52,7 +68,7 @@ def auto_status(db,qid,rk,status,product='Автокредит',end='2999-12-31'
                 status_cd=status,level25_product_bp_nm=product,src_cd='SHARED_SOURCE',
                 effective_from_dttm='2025-01-01 00:00:00',effective_to_dttm=end)
     record.update(kw)
-    db.execute(f"insert into {S}.tech_questionnaire_status ({', '.join(record)}) values ({', '.join('?' for _ in record)})",list(record.values()))
+    db.execute(f"insert into {CDMR}.tech_questionnaire_status ({', '.join(record)}) values ({', '.join('?' for _ in record)})",list(record.values()))
 
 def rows(db,sql):return db.execute(sql).fetchall()
 
@@ -75,14 +91,14 @@ def test_two_sources_and_links():
     db.executemany("insert into bdm.application values (?, ?, ?, '2999-12-31', '2025-01-01')",[
         (301,'KN_OLD','MSCL'),(301,'KN_NEW','MSCL'),(401,'KN_NEW','MSSA'),
         (402,'UZ_NUM','MSSA'),(403,'UZ_ONLY_NUM','MSSA')])
-    old.add_tas(db,301,'KN_APP','MSCL',401,level25_product_bp_nm='Потребкредит')
-    old.add_tas(db,301,'KN_APP','MSCL',401,level25_product_bp_nm='Потребкредит')
-    old.add_tas(db,302,'CC_APP1','CCPP_CRCA',402,level25_product_bp_nm='Кредитные карты')
-    old.add_tas(db,303,'CC_APP2','CCPP_BATR',402,level25_product_bp_nm='Кредитные карты')
-    old.add_tas(db,-1,None,None,403,level25_product_bp_nm='Универсальная заявка')
-    old.add_tas(db,304,'KN_APP_ONLY','MSCL',-1,level25_product_bp_nm='Потребкредит')
-    old.add_tas(db,501,'AUTO_READY','ALPP',-1,level25_product_bp_nm='Автокредит')
-    old.add_tas(db,502,'AUTO_APP_ONLY','ALPP',-1,level25_product_bp_nm='Автокредит')
+    add_tas(db,301,'KN_APP','MSCL',401,level25_product_bp_nm='Потребкредит')
+    add_tas(db,301,'KN_APP','MSCL',401,level25_product_bp_nm='Потребкредит')
+    add_tas(db,302,'CC_APP1','CCPP_CRCA',402,level25_product_bp_nm='Кредитные карты')
+    add_tas(db,303,'CC_APP2','CCPP_BATR',402,level25_product_bp_nm='Кредитные карты')
+    add_tas(db,-1,None,None,403,level25_product_bp_nm='Универсальная заявка')
+    add_tas(db,304,'KN_APP_ONLY','MSCL',-1,level25_product_bp_nm='Потребкредит')
+    add_tas(db,501,'AUTO_READY','ALPP',-1,level25_product_bp_nm='Автокредит')
+    add_tas(db,502,'AUTO_APP_ONLY','ALPP',-1,level25_product_bp_nm='Автокредит')
     raw_before=rows(db,f'select count(*) from {old.RAW}')
     # Old results are sentinels: v2 must not drop or write them.
     db.execute(f'create table {S}.prt_tqs_questionnaire (sentinel integer); insert into {S}.prt_tqs_questionnaire values (777)')
@@ -134,7 +150,9 @@ def test_structure_and_original_filters():
     targets=re.findall(r'^create table &db_sbx\.(\w+)$',source,re.M)
     assert len(targets)==15 and all(n.startswith('prt_if2_') for n in targets)
     assert source.count('from &p_db_rawd.v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention')==1
-    assert source.count('from &p_db_tqs.tech_questionnaire_status')==1
+    assert source.count('from &p_db_cdmr.tech_questionnaire_status')==1
+    assert source.count('from &p_db_cdmr.tech_application_status')==2
+    assert not re.search(r'&(?:p_db_tqs|p_db_tas|p_prod_(?:kn|kk|auto)_name)\b',source)
     assert not re.search(r'select\s+(?:\w+\.)?\*',source,re.I)
     assert not re.search(r'prt_if2_\w*(?:raw|parsed|checked|ranked)\b',source)
     assert "not like any (array[&p_test_first_nm_like_text_list])" in source

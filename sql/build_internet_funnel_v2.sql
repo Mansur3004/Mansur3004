@@ -9,12 +9,8 @@
 Макропеременные (подстановка SQL-клиентом/ETL, как в исходных прототипах):
   &db_sbx                     - схема результатов; по умолчанию: sbx_pre_orb_fd
   &p_db_rawd                  - схема RAW; по умолчанию: rd_raw_orb
-  &p_db_cdmr                  - схема RK анкеты; по умолчанию: dm_pik_fd_cdmr
+  &p_db_cdmr                  - схема TQS/TAS и связи с RK; по умолчанию: dm_pik_fd_cdmr
   &p_db_bdm                   - схема заявок BDM; по умолчанию: bdm
-  &p_db_tqs                   - схема ГОТОВОЙ tech_questionnaire_status для авто;
-                                по умолчанию: sbx_pre_orb_fd
-  &p_db_tas                   - схема ГОТОВОЙ tech_application_status;
-                                по умолчанию: sbx_pre_orb_fd
   &p_max_date                 - максимальная дата; по умолчанию: '2999-12-31'
   &p_min_dttm                 - замена NULL в сортировке; по умолчанию: '1900-01-01 00:00:00'
   &p_rds_report_dt_date       - начало выборки RAW, как в TQS; по умолчанию: '2024-10-01'
@@ -35,9 +31,9 @@
   &p_quest_src_cd_kk_list     - один LIKE-шаблон исходной ветки КК; по умолчанию: '1383%'
   &p_quest_not_len_id_kk_list - исключённые длины ID КК; по умолчанию: 6
 
-  &p_prod_kn_name             - по умолчанию: 'Потребкредит'
-  &p_prod_kk_name             - по умолчанию: 'Кредитные карты'
-  &p_prod_auto_name           - по умолчанию: 'Автокредит'
+  &p_quest_25lvl_product_kn_list             - по умолчанию: 'Потребкредит'
+  &p_quest_25lvl_product_kk_list             - по умолчанию: 'Кредитные карты'
+  &p_quest_25lvl_product_auto_list           - по умолчанию: 'Автокредит'
   &p_kn_verification_status  - по умолчанию: '0', '10.0', 'одобрено', 'CHECK_LIST_EMPTY',
                                 'CHECK_LIST_ANTIFRAUD_OR_PRODUCT'
   &p_kk_verification_status  - по умолчанию: 'DONE', 'COURIER'
@@ -50,9 +46,13 @@
   &P_KN_SRC                   - источник КН; по умолчанию: 'MSCL'
   &P_KK_SRC                   - источники КК; по умолчанию: 'CCPP_CRCA', 'CCPP_BATR'
   &P_AUTO_SRC                 - источник авто; по умолчанию: 'ALPP'
-  &p_kn_kk_link_mode         - исследуемая связка КН/КК; по умолчанию: 'ALL';
+  &p_kn_kk_link_mode         - добавленный в этом прототипе режим сравнения; по умолчанию: 'ALL';
                                 'DIRECT' = BDM.application_rk -> TAS.application_rk;
                                 'UZ' = BDM УЗ -> TAS.parent_application_rk или собственный RK УЗ.
+
+p_kn_kk_link_mode отсутствует в исходных TQS/TAS: он добавлен для сравнения
+прямой связки и пути через УЗ. ALL включает оба условия JOIN в шаге 1.10;
+SELECT DISTINCT оставляет одну пару, если совпали оба пути.
 
 Имена схем задаются без кавычек; строки/даты — в одинарных кавычках;
 списки — SQL-значения через запятую без внешних скобок; числа — без кавычек.
@@ -232,7 +232,7 @@ select
         when r.status in ('SCORING') then 'В процессе скоринга'
         when r.status in ('SELECT_CARD') then 'Выбор карты'
         else r.status end as status_name,
-    cast(&p_prod_kk_name as text) as level25_product_bp_nm,
+    cast(&p_quest_25lvl_product_kk_list as text) as level25_product_bp_nm,
     r.original_effective_from_dttm_kk_dk as effective_from_dttm
 from &db_sbx.prt_if2_tqs_questionnaire r
 where 1=1
@@ -292,7 +292,7 @@ select
         when r.status in ('UNKNOWN-ERROR') then 'Неизвестная ошибка'
         when r.status is null then 'Не определено'
         else r.status end as status_name,
-    cast(&p_prod_kn_name as text) as level25_product_bp_nm,
+    cast(&p_quest_25lvl_product_kn_list as text) as level25_product_bp_nm,
     case r.status
         when 'создана' then 1
         when 'идентификация' then 2
@@ -528,9 +528,9 @@ select
     questionnaire_rk,
     level25_product_bp_nm,
     max(case
-        when level25_product_bp_nm = cast(&p_prod_kn_name as text)
+        when level25_product_bp_nm = cast(&p_quest_25lvl_product_kn_list as text)
          and status_cd in (&p_kn_verification_status) then 1
-        when level25_product_bp_nm = cast(&p_prod_kk_name as text)
+        when level25_product_bp_nm = cast(&p_quest_25lvl_product_kk_list as text)
          and status_cd in (&p_kk_verification_status) then 1
         else 0 end) as quest_verification_flg
 from &db_sbx.prt_if2_tech_questionnaire_status
@@ -591,8 +591,8 @@ left join &p_db_bdm.application app
    and app.application_begin_date >= cast(&P_BEGIN_DATE as date)
    and app.application_rk is not null and app.application_rk <> -1
    and (app.src_cd = &P_UZ_SRC
-        or (q.level25_product_bp_nm = cast(&p_prod_kn_name as text) and app.src_cd = &P_KN_SRC)
-        or (q.level25_product_bp_nm = cast(&p_prod_kk_name as text) and app.src_cd in (&P_KK_SRC)))
+        or (q.level25_product_bp_nm = cast(&p_quest_25lvl_product_kn_list as text) and app.src_cd = &P_KN_SRC)
+        or (q.level25_product_bp_nm = cast(&p_quest_25lvl_product_kk_list as text) and app.src_cd in (&P_KK_SRC)))
 where q.questionnaire_dttm >= cast(&P_BEGIN_DATE as timestamp)
    or q.questionnaire_dttm is null
 ) distributed randomly;
@@ -631,7 +631,7 @@ select distinct
     t.level25_product_bp_nm,
     t.level35_product_bp_nm,
     t.processed_dttm
-from &p_db_tas.tech_application_status t
+from &p_db_cdmr.tech_application_status t
 where (t.src_cd in (&P_KN_SRC, &P_KK_SRC, &P_UZ_SRC)
        or (t.src_cd is null and t.parent_src_cd = &P_UZ_SRC))
   and (coalesce(t.application_dt, t.parent_application_dt) >= cast(&P_BEGIN_DATE as date)
@@ -685,8 +685,8 @@ inner join &db_sbx.prt_if2_kn_kk_tas t
     or (cast(&p_kn_kk_link_mode as text) in ('ALL', 'UZ')
         and q.bdm_src_cd = &P_UZ_SRC
         and ((t.parent_application_rk = q.bdm_application_rk and t.parent_src_cd = &P_UZ_SRC
-              and ((q.level25_product_bp_nm = cast(&p_prod_kn_name as text) and t.src_cd = &P_KN_SRC)
-                   or (q.level25_product_bp_nm = cast(&p_prod_kk_name as text) and t.src_cd in (&P_KK_SRC))
+              and ((q.level25_product_bp_nm = cast(&p_quest_25lvl_product_kn_list as text) and t.src_cd = &P_KN_SRC)
+                   or (q.level25_product_bp_nm = cast(&p_quest_25lvl_product_kk_list as text) and t.src_cd in (&P_KK_SRC))
                    or t.src_cd is null))
              or (t.application_rk = q.bdm_application_rk and t.src_cd = &P_UZ_SRC)))
 ) distributed randomly;
@@ -802,8 +802,8 @@ select
     cast(max(case when q.status_cd in (&p_auto_verification_status) then 1 else 0 end) as boolean)
         as quest_verification_flg,
     q.level25_product_bp_nm
-from &p_db_tqs.tech_questionnaire_status q
-where q.level25_product_bp_nm = cast(&p_prod_auto_name as text)
+from &p_db_cdmr.tech_questionnaire_status q
+where q.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
 group by q.questionnaire_id, q.questionnaire_rk, q.level25_product_bp_nm
 having min(q.questionnaire_dttm) >= cast(&P_BEGIN_DATE as timestamp)
     or min(q.questionnaire_dttm) is null
@@ -843,7 +843,7 @@ select distinct
     t.level25_product_bp_nm,
     t.level35_product_bp_nm,
     t.processed_dttm
-from &p_db_tas.tech_application_status t
+from &p_db_cdmr.tech_application_status t
 where t.src_cd = &P_AUTO_SRC
   and (coalesce(t.application_dt, t.parent_application_dt) >= cast(&P_BEGIN_DATE as date)
        or coalesce(t.application_dt, t.parent_application_dt) is null)
