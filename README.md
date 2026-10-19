@@ -1,5 +1,15 @@
 # Витрина статусов анкет и заявок
 
+Новый вариант по уточнённой логике: [build_internet_funnel_v2.sql](sql/build_internet_funnel_v2.sql).
+КН/КК проходят исходную цепочку TQS из RAW, авто читается из готовой TQS.
+[Пошаговая инструкция TXT](docs/prototype_v2_steps.txt) объясняет назначение,
+происхождение и способ копирования каждого шага, с номерами строк нового SQL.
+Результат — `&db_sbx.prt_if2_tech_internet_funnel`; таблицы с префиксом
+`prt_if2_` не затрагивают результаты прежнего варианта.
+Проверка: `/workspace/.venvs/qas/bin/python tests/validate_prototype_v2.py`.
+
+Ниже описан предыдущий прототип: его SQL, тесты и каталог атрибутов сохранены.
+
 [Единый SQL](sql/build_questionnaire_application_status.sql) восстанавливает
 кредитную часть показанного ETL `tech_questionnaire_status`, сохраняет
 `application_num`, получает настоящий `questionnaire_rk` и соединяет анкеты
