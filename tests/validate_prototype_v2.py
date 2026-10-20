@@ -6,15 +6,18 @@ SQL is independently parsed with pglast. No bank or Greenplum connection is used
 """
 from pathlib import Path
 import re
+import duckdb
 from pglast import parse_sql
 import validate_combined as old
 
 ROOT=Path(__file__).resolve().parents[1]
 SCRIPT=ROOT/'sql/build_internet_funnel_v2.sql'
+COVERAGE_SCRIPT=ROOT/'sql/check_internet_funnel_coverage.sql'
 S=old.S
 CDMR='dm_pik_fd_cdmr'
 FINAL=f'{S}.prt_if2_tech_internet_funnel'
 MACROS=old.TEST_MACROS | {
+    'p_funnel_table':FINAL,
     'p_quest_25lvl_product_kn_list':"'Потребкредит'",
     'p_quest_25lvl_product_kk_list':"'Кредитные карты'",
     'p_quest_25lvl_product_auto_list':"'Автокредит'",
@@ -22,13 +25,13 @@ MACROS=old.TEST_MACROS | {
 }
 FINAL_FIELDS='questionnaire_rk questionnaire_dttm quest_verification_flg parent_application_rk parent_application_dt parent_open_flg parent_prescoring_flg parent_at_work_flg parent_approved_flg application_rk application_dt deal_issue_date create_flg at_work_flg final_approved_flg agr_signed_flg level25_product_bp_nm level35_product_bp_nm processed_dttm'.split()
 
-def pg_sql(overrides=None):
+def pg_sql(overrides=None,source=None):
     values=MACROS|(overrides or {})
-    sql=re.sub(r'&([A-Za-z_][A-Za-z0-9_]*)',lambda m:values[m[1]],SCRIPT.read_text())
-    return re.sub(r'\bdistributed\s+randomly\s*;', ';',sql,flags=re.I)
+    sql=re.sub(r'&([A-Za-z_][A-Za-z0-9_]*)',lambda m:values[m[1]],SCRIPT.read_text() if source is None else source)
+    return re.sub(r'\bdistributed\s+(?:randomly|by\s*\([^)]+\))\s*;', ';',sql,flags=re.I)
 
-def execution_sql(overrides=None):
-    sql=re.sub(r'with\s*\(APPENDONLY\s*=\s*true,\s*ORIENTATION\s*=\s*column,\s*COMPRESSTYPE\s*=\s*zstd,\s*COMPRESSLEVEL\s*=\s*5\)','',pg_sql(overrides),flags=re.I)
+def execution_sql(overrides=None,source=None):
+    sql=re.sub(r'with\s*\(APPENDONLY\s*=\s*true,\s*ORIENTATION\s*=\s*column,\s*COMPRESSTYPE\s*=\s*zstd,\s*COMPRESSLEVEL\s*=\s*5\)','',pg_sql(overrides,source),flags=re.I)
     # PostgreSQL LIKE ANY over an array is existential, including NOT LIKE ANY.
     sql=re.sub(r"coalesce\(upper\(r.first_nm\), '#'\) not like any \(array\[(.*?)\]\)",
                r"exists (select 1 from unnest(array[\1]) patterns(pattern) where coalesce(upper(r.first_nm), '#') not like pattern)",sql,flags=re.S)
@@ -148,7 +151,8 @@ def test_verification_lists():
 def test_structure_and_original_filters():
     source=SCRIPT.read_text()
     targets=re.findall(r'^create table &db_sbx\.(\w+)$',source,re.M)
-    assert len(targets)==15 and all(n.startswith('prt_if2_') for n in targets)
+    assert len(targets)==19 and all(n.startswith('prt_if2_') for n in targets)
+    assert len([n for n in targets if not n.startswith('prt_if2_coverage_')])==15
     assert source.count('from &p_db_rawd.v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention')==1
     assert source.count('from &p_db_cdmr.tech_questionnaire_status')==1
     assert source.count('from &p_db_cdmr.tech_application_status')==2
@@ -168,24 +172,57 @@ def test_structure_and_original_filters():
     assert rows(db,f'select count(*) from {FINAL}')==[(1,)]
     db=db_new();db.execute(execution_sql())
     assert rows(db,f'select count(*) from {FINAL}')==[(0,)]
-    print('PASS: 15 sequential steps, original WHERE semantics, no added validation tables, no SELECT *, empty input and no old-output writes.')
+    print('PASS: 15 ETL tables plus 4 coverage tables, original WHERE semantics, no added RAW validation tables, no SELECT *, empty input and no old-output writes.')
 
 def test_step_instructions():
     source=SCRIPT.read_text()
     doc=(ROOT/'docs/prototype_v2_steps.txt').read_text()
     sql_lines=source.splitlines()
     blocks=re.findall(r'^-- Шаг (\d+\.\d+)\. ([^\n]+)\n-- Откуда: ([^\n]+)\n-- Зачем: ([^\n]+)\n-- Копирование: ([^\n]+)\ndrop table',source,re.M)
-    assert len(blocks)==15
+    assert len(blocks)==19
     documented=re.findall(r'^ШАГ (\d+\.\d+) — [^\n]+\nSQL V2: строки (\d+)–(\d+)\.',doc,re.M)
-    assert len(documented)==16  # 15 DROP/CREATE steps plus the read-only report 3.2.
-    assert {num for num,_,_ in documented}=={block[0] for block in blocks}|{'3.2'}
+    assert len(documented)==20  # 19 DROP/CREATE steps plus the final report 3.6.
+    assert {num for num,_,_ in documented}=={block[0] for block in blocks}|{'3.6'}
     for num,start,end in documented:
         assert sql_lines[int(start)-1].startswith(f'-- Шаг {num}. ')
         assert int(end)>=int(start)
     for marker in ['1.1-A','1.1-B']:
         assert marker in source and marker in doc
     assert 'Можно полностью скопировать из tech_questionnaire_status' in doc
-    print('PASS: all 15 table steps explain origin/purpose/copying; TXT step ranges match the actual SQL lines.')
+    print('PASS: all 19 table steps explain origin/purpose/copying; TXT step ranges match the actual SQL lines.')
+
+def test_coverage_rollup():
+    standalone=COVERAGE_SCRIPT.read_text()
+    assert len(parse_sql(pg_sql(source=standalone)))==9
+    marker='-- Шаг 3.2.'
+    body=SCRIPT.read_text().split(marker,1)[1]
+    standalone_body=standalone.split(marker,1)[1].replace('&p_funnel_table','&db_sbx.prt_if2_tech_internet_funnel')
+    assert body==standalone_body
+    assert not re.search(r'count\s*\(\s*distinct',re.sub(r'--[^\n]*','',body),re.I)
+    db=duckdb.connect();db.execute(f'create schema {S}')
+    db.execute(f'create table {FINAL} (questionnaire_rk bigint,parent_application_rk bigint,application_rk bigint)')
+    db.executemany(f'insert into {FINAL} values (?,?,?)',[
+        (1,10,100),(1,10,100),(1,11,101),(2,None,None),(2,None,None),
+        (3,20,None),(3,20,None),(None,10,100),(None,None,200),(None,30,None),
+        (None,None,None),(4,11,101),(4,None,None)])
+    # Independent reference: the exact original query from the user's screenshot.
+    reference=rows(db,f'''select count(distinct questionnaire_rk),
+        count(distinct case when parent_application_rk is not null or application_rk is not null then questionnaire_rk end),
+        round(100.0*count(distinct case when parent_application_rk is not null or application_rk is not null then questionnaire_rk end)
+              /nullif(count(distinct questionnaire_rk),0),2),
+        count(distinct case when parent_application_rk is not null or application_rk is not null then row(parent_application_rk,application_rk) end),
+        count(distinct case when questionnaire_rk is not null and (parent_application_rk is not null or application_rk is not null)
+                            then row(parent_application_rk,application_rk) end) from {FINAL}''')
+    assert reference==[(4,3,75.0,5,3)]
+    for _ in range(2):
+        assert db.execute(execution_sql(source=standalone)).fetchall()==reference
+    db.execute(f'delete from {FINAL}')
+    assert db.execute(execution_sql(source=standalone)).fetchall()==[(0,0,None,0,0)]
+    db.execute(f'create table {S}.custom_funnel as select questionnaire_rk,parent_application_rk,application_rk from {FINAL}')
+    db.execute(f'insert into {S}.custom_funnel values (10,NULL,1000)')
+    assert db.execute(execution_sql({'p_funnel_table':f'{S}.custom_funnel'},source=standalone)).fetchall()==[(1,1,100.0,1,1)]
+    assert rows(db,f'select count(*) from {FINAL}')==[(0,)]
+    print('PASS: sequential exact coverage equals the original DISTINCT query, including duplicates, mixed linked/unlinked rows, NULL pairs, empty input and custom source.')
 
 if __name__=='__main__':
     print('PARSED PostgreSQL statements:',len(parse_sql(pg_sql())))
@@ -193,4 +230,5 @@ if __name__=='__main__':
     test_verification_lists()
     test_structure_and_original_filters()
     test_step_instructions()
+    test_coverage_rollup()
     print('Offline synthetic tests only; Greenplum and bank data remain unverified.')
