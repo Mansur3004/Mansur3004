@@ -1,6 +1,20 @@
 # Витрина статусов анкет и заявок
 
-Новый вариант по уточнённой логике: [build_internet_funnel_v2.sql](sql/build_internet_funnel_v2.sql).
+Актуальный вариант по ФТ от 26–28.10.2026:
+[build_internet_funnel_v3.sql](sql/build_internet_funnel_v3.sql).
+RK анкет берётся из готовой TQS, отсутствующие ключи равны `-1`.
+При найденной связи с TAS флаг верификации автоматически `true`;
+без связи используется история статусов, без анкеты флаг равен `NULL`.
+Итог — `&db_sbx.man_prt_tif_tech_internet_funnel`.
+При запуске V3 пересоздаются его таблицы `man_prt_tif_`; старые SQL сохранены.
+[Перечень замен с номерами строк скриншотов](docs/prototype_v3_changes.txt).
+[Короткие счётчики и проверки V3](sql/check_internet_funnel_coverage_v3.sql)
+выполняются отдельными SELECT без новых таблиц и без макропеременных.
+Проверка: `/workspace/.venvs/qas/bin/python tests/validate_prototype_v3.py`.
+Старые диагностические запросы с проверкой только `IS NOT NULL` относятся к
+старым результатам: для V3 присутствие сущности определяется через `RK <> -1`.
+
+Предыдущий вариант: [build_internet_funnel_v2.sql](sql/build_internet_funnel_v2.sql).
 КН/КК проходят исходную цепочку TQS из RAW, авто читается из готовой TQS.
 [Пошаговая инструкция TXT](docs/prototype_v2_steps.txt) объясняет назначение,
 происхождение и способ копирования каждого шага, с номерами строк нового SQL.
