@@ -1,10 +1,15 @@
 /*
-НОВЫЙ ПРОТОТИП V2. Предыдущий SQL не изменён.
+ПРОТОТИП V4. MISREP-4455 TECH_INTERNET_FUNNEL.
+Актуальная версия по ФТ от 03.11.2026. Таблицы прототипа: man_prt_tif_.
+Регламент целевого объекта: ежедневно после обновления источников;
+начальное наполнение с 01.01.2025, далее пересчёт с начала прошлого квартала.
+Итог без истории версий, реализация в dm_pik_fd_cdmr.
+В прототипе результаты создаются в &db_sbx (по умолчанию sbx_pre_orb_fd).
 КН/КК: копия кредитной части tech_questionnaire_status с application_num ->
 верификация -> bdm.application -> tech_application_status.
 Авто: готовая tech_questionnaire_status -> верификация -> tech_application_status.
-Итог: &db_sbx.prt_if2_tech_internet_funnel, ровно 19 согласованных полей.
-Все создаваемые таблицы имеют префикс prt_if2_; результаты старого SQL не удаляются.
+Итог: &db_sbx.man_prt_tif_tech_internet_funnel, ровно 19 согласованных полей.
+Все создаваемые таблицы имеют префикс man_prt_tif_; при запуске они пересоздаются.
 
 Макропеременные (подстановка SQL-клиентом/ETL, как в исходных прототипах):
   &db_sbx                     - схема результатов; по умолчанию: sbx_pre_orb_fd
@@ -13,9 +18,9 @@
   &p_db_bdm                   - схема заявок BDM; по умолчанию: bdm
   &p_max_date                 - максимальная дата; по умолчанию: '2999-12-31'
   &p_min_dttm                 - замена NULL в сортировке; по умолчанию: '1900-01-01 00:00:00'
-  &p_rds_report_dt_date       - начало выборки RAW, как в TQS; по умолчанию: '2024-10-01'
-  &P_BEGIN_DATE               - начало когорты анкет/заявок; по умолчанию: '2025-01-01'
-  &p_report_timestamp         - один момент этой загрузки; пример: '2026-10-19 00:00:00'
+  &p_rds_report_dt_date       - начало выборки RAW, как в вашей копии TQS; по умолчанию: '2025-01-01'
+  &P_BEGIN_DATE               - начало пересчитываемой выборки; начальное наполнение: '2025-01-01'
+  &p_report_timestamp         - один момент этой загрузки; пример: '2026-11-03 00:00:00'
 
   &p_test_first_nm_like_text_list - как в TQS; по умолчанию:
                                  '%ТЕСТ%', '%ТКЕСТ%', '%ТКЕКСТ%', '%ТЕМСТ%', '%ЛИПОВЫЙ%',
@@ -42,30 +47,29 @@
                                 'DRIVER_CARD_ISSUE', 'DRIVER_CARD_ISSUE_UPLOADED', 'DOSSIER_UPLOADED',
                                 'DEAL_VER', 'CREDIT_ISSUED', 'PRODUCT_BASKET_SIGNED'
 
-  &P_UZ_SRC                   - источник УЗ; по умолчанию: 'MSSA'
-  &P_KN_SRC                   - источник КН; по умолчанию: 'MSCL'
-  &P_KK_SRC                   - источники КК; по умолчанию: 'CCPP_CRCA', 'CCPP_BATR'
-  &P_AUTO_SRC                 - источник авто; по умолчанию: 'ALPP'
-  &p_kn_kk_link_mode         - добавленный в этом прототипе режим сравнения; по умолчанию: 'ALL';
-                                'DIRECT' = BDM.application_rk -> TAS.application_rk;
-                                'UZ' = BDM УЗ -> TAS.parent_application_rk или собственный RK УЗ.
-
-p_kn_kk_link_mode отсутствует в исходных TQS/TAS: он добавлен для сравнения
-прямой связки и пути через УЗ. ALL включает оба условия JOIN в шаге 1.10;
-SELECT DISTINCT оставляет одну пару, если совпали оба пути.
+Регламент параметра P_BEGIN_DATE: первый запуск — '2025-01-01'; ежедневно —
+GREATEST(DATE '2025-01-01', DATE_TRUNC('quarter', report_timestamp)::date - INTERVAL '3 months').
+Параметр задаётся ETL/SQL-клиентом. Прототип пересоздаёт расчётную выборку в sbx;
+загрузчик целевого объекта должен сохранять результат за пределами окна пересчёта.
+Это не DELETE/INSERT целевой витрины dm_pik_fd_cdmr.
 
 Имена схем задаются без кавычек; строки/даты — в одинарных кавычках;
 списки — SQL-значения через запятую без внешних скобок; числа — без кавычек.
 
 В 1.1 оставлены исходные CAST, WHERE, MIN и ROW_NUMBER в одном запросе.
+Как на скриншотах, отбор КН/КК выполняется в ветках 1.2/1.3 после подготовки RAW.
 Отдельных RAW/parsed/checked/ranked-таблиц нет. Исходные фильтры и формула
 EXTRACT(SECONDS) здесь не исправляются и не дополняются новыми проверками.
 TQS-цепочка копируется только для КН/КК; для авто RAW не используется.
-Флаг — MAX(CASE ... THEN 1 ELSE 0 END), как у флагов TAS, по ВСЕЙ истории.
+Предварительный флаг — MAX(CASE ... THEN 1 ELSE 0 END) по ВСЕЙ истории.
+Итоговый флаг: при найденной связи анкеты с TAS — true независимо от статусов;
+для анкеты без заявки — исторический флаг; для заявки без анкеты — NULL.
+Все три итоговых RK обязательны: отсутствующая сущность обозначается -1.
+Значение -1 не считается существующей сущностью и не участвует в связях.
 Статусы берутся из макросписков, соответствующих всем выделениям Excel.
 Верификация/соединения анкет после назначения продукта не фильтруют q.src_cd.
 
-В 1.6 сохранён исходный INNER JOIN на существующие RK. Поэтому базой КН/КК
+В 1.6 INNER JOIN получает готовые RK из актуального среза TQS, а не TQXC. Поэтому базой КН/КК
 являются анкеты, прошедшие исходный ETL TQS, включая наличие RK. Новые RK
 не генерируются. Все номера переживших исходную дедупликацию статусов
 сохраняются и участвуют в связи. Версии не отбрасываются до расчёта флага.
@@ -73,18 +77,26 @@ TQS-цепочка копируется только для КН/КК; для а
 TAS читается как готовый актуальный снимок, как в предоставленном DDL.
 Поля окончания версии TAS не показано; processed_dttm не используется вместо него.
 КН/КК и авто сохраняют несвязанные анкеты и заявки внутри своих когорт.
-Оба итоговых уровня продукта равны COALESCE(TAS.level25, TQS.level25).
-Описание копирования каждого шага: docs/prototype_v2_steps.txt.
+Правило level35 сохраняет последнее прямое уточнение пользователя: равно level25.
+В новом DOCX формулировка отличается; требуется подтверждение (см. документацию).
+Правки и ограничения: docs/prototype_v4_steps.txt.
+КН/КК соединяются только по app.application_rk = tas.parent_application_rk
+и app.src_cd = tas.parent_src_cd. Прямого пути на tas.application_rk больше нет.
+Временное условие соединения авто не додумано: в ФТ нет полей/правила,
+а известный DDL TAS не содержит интервалов; уточнение запрошено.
+DISTINCT сохранён только в исходном RAW-этапе 1.1. Далее агрегируются
+номера/ключи связей, строки TAS и финальные атрибуты не дедуплицируются.
+Проверки: sql/check_internet_funnel.sql. Каждый SELECT выполняется отдельно.
 */
 
 -- ==================== 1. КН/КК: КОПИЯ TQS -> ФЛАГ -> ЗАЯВКА ====================
 
 -- Шаг 1.1. Очистка и подгонка RAW, как в начале tech_questionnaire_status.
 -- Откуда: исходный prt_tqs_questionnaire, скриншот строк 53–131.
--- Зачем: получить те же исходные атрибуты/приоритеты сразу для КН/КК; application_num уже есть в исходнике.
--- Копирование: скопировать исходный шаг, добавить WHERE 1.1-A и вывести src_cd_src (1.1-B), если его нет в SELECT.
-drop table if exists &db_sbx.prt_if2_tqs_questionnaire;
-create table &db_sbx.prt_if2_tqs_questionnaire
+-- Зачем: сохранить исходную очистку и MIN/ROW_NUMBER; продуктовые ветки ниже оставят только КН/КК.
+-- Копирование: исходный prt_tqs_questionnaire; явно перечислить поля и сохранить src_cd_src и application_num.
+drop table if exists &db_sbx.man_prt_tif_tqs_questionnaire;
+create table &db_sbx.man_prt_tif_tqs_questionnaire
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
@@ -146,7 +158,6 @@ select distinct
             r.salary_card_flg desc,
             r.phone_num
     ) as rn,
-    -- Изменение 1.1-B: поле источника, которое уже используется следующими ветками TQS.
     r.src_cd_src
 from &p_db_rawd.v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention r
 where 1=1
@@ -159,10 +170,6 @@ where 1=1
   and coalesce(r.questionnaire_dt, r.business_dt, r.createtime_dttm) not like '%+%'
   and cast(coalesce(r.questionnaire_dt, r.business_dt, r.createtime_dttm) as timestamp)
       >= cast(&p_rds_report_dt_date as timestamp)
-  -- Изменение 1.1-A: только условия двух кредитных веток исходного TQS.
-  and ((r.src_cd_src like &p_quest_src_cd_kk_list or r.product_type_code in (&p_quest_product_kk_list))
-       or ((r.src_cd_src like &p_quest_src_cd_kn_list or r.product_type_code in (&p_quest_product_kn_list))
-           and r.src_cd_src not like &p_quest_src_cd_kk_list))
 )
 select
     p.questionnaire_id,
@@ -191,8 +198,8 @@ where p.rn = 1
 -- Откуда: раздел «Кредитные карты», строки 134–187 tech_questionnaire_status.
 -- Зачем: присвоить level25_product_bp_nm тем же способом; далее продукт фильтруется по этому полю.
 -- Копирование: можно полностью скопировать из tech_questionnaire_status; заменить только имена таблиц/макроимена.
-drop table if exists &db_sbx.prt_if2_tqs_kk_questionnaire;
-create table &db_sbx.prt_if2_tqs_kk_questionnaire
+drop table if exists &db_sbx.man_prt_tif_tqs_kk_questionnaire;
+create table &db_sbx.man_prt_tif_tqs_kk_questionnaire
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
@@ -234,7 +241,7 @@ select
         else r.status end as status_name,
     cast(&p_quest_25lvl_product_kk_list as text) as level25_product_bp_nm,
     r.original_effective_from_dttm_kk_dk as effective_from_dttm
-from &db_sbx.prt_if2_tqs_questionnaire r
+from &db_sbx.man_prt_tif_tqs_questionnaire r
 where 1=1
   and (r.src_cd_src like &p_quest_src_cd_kk_list or r.product_type_code in (&p_quest_product_kk_list))
   and length(r.questionnaire_id) not in (&p_quest_not_len_id_kk_list)
@@ -244,8 +251,8 @@ where 1=1
 -- Откуда: раздел «Кредит наличными», строки 190–299 tech_questionnaire_status.
 -- Зачем: присвоить level25_product_bp_nm тем же способом; далее продукт фильтруется по этому полю.
 -- Копирование: можно полностью скопировать из tech_questionnaire_status; заменить только имена таблиц/макроимена.
-drop table if exists &db_sbx.prt_if2_tqs_kn_questionnaire;
-create table &db_sbx.prt_if2_tqs_kn_questionnaire
+drop table if exists &db_sbx.man_prt_tif_tqs_kn_questionnaire;
+create table &db_sbx.man_prt_tif_tqs_kn_questionnaire
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
@@ -343,7 +350,7 @@ select
         when 'CLIENT_DECLINE' then 47
         else null end as status_priority,
     r.original_effective_from_dttm_auto_kn as original_effective_from_dttm
-from &db_sbx.prt_if2_tqs_questionnaire r
+from &db_sbx.man_prt_tif_tqs_questionnaire r
 where 1=1
   and (r.src_cd_src like &p_quest_src_cd_kn_list or r.product_type_code in (&p_quest_product_kn_list))
   and r.src_cd_src not like &p_quest_src_cd_kk_list
@@ -353,8 +360,8 @@ where 1=1
 -- Откуда: prt_tqs_kn_auto_dk_questionnaire, строки 659–787 tech_questionnaire_status.
 -- Зачем: сохранить исходное построение effective_from_dttm, не добавляя отдельные проверки.
 -- Копирование: скопировать исходный шаг; оставить только КН и пронести application_num через оба SELECT.
-drop table if exists &db_sbx.prt_if2_tqs_kn_timeline;
-create table &db_sbx.prt_if2_tqs_kn_timeline
+drop table if exists &db_sbx.man_prt_tif_tqs_kn_timeline;
+create table &db_sbx.man_prt_tif_tqs_kn_timeline
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
@@ -386,7 +393,7 @@ select
     count(*) over (partition by questionnaire_id, original_effective_from_dttm
         order by status_priority) as count_eq_ef,
     count(*) over (partition by questionnaire_id, original_effective_from_dttm) as count_eq_ef_not_ordered
-from &db_sbx.prt_if2_tqs_kn_questionnaire
+from &db_sbx.man_prt_tif_tqs_kn_questionnaire
 )
 select
     application_num,
@@ -421,8 +428,8 @@ from kn_pre_eff_calc
 -- Откуда: prt_tqs_questionnaire_all, строки 789–840 tech_questionnaire_status.
 -- Зачем: получить исходный состав TQS после переименований UTM/status/src и сохранить номер заявки.
 -- Копирование: скопировать UNION КК/КН; убрать остальные продукты, добавить application_num в оба плеча.
-drop table if exists &db_sbx.prt_if2_tqs_questionnaire_all;
-create table &db_sbx.prt_if2_tqs_questionnaire_all
+drop table if exists &db_sbx.man_prt_tif_tqs_questionnaire_all;
+create table &db_sbx.man_prt_tif_tqs_questionnaire_all
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
@@ -446,7 +453,7 @@ select
     kk.level25_product_bp_nm,
     kk.effective_from_dttm,
     kk.application_num
-from &db_sbx.prt_if2_tqs_kk_questionnaire kk
+from &db_sbx.man_prt_tif_tqs_kk_questionnaire kk
 union all
 select
     kn.questionnaire_id,
@@ -466,22 +473,22 @@ select
     kn.level25_product_bp_nm,
     kn.effective_from_dttm,
     kn.application_num
-from &db_sbx.prt_if2_tqs_kn_timeline kn
+from &db_sbx.man_prt_tif_tqs_kn_timeline kn
 ) distributed randomly;
 
 -- Шаг 1.6. Получение RK и интервалов TQS для КН/КК.
--- Откуда: финальная сборка prot_tech_questionnaire_status, строки 843–884 исходного TQS.
--- Зачем: подтянуть настоящий RK из существующей связи с клиентом и сохранить все атрибуты TQS плюс номер.
--- Копирование: скопировать исходный INNER JOIN/LEAD; добавить base.application_num и момент загрузки в SELECT.
-drop table if exists &db_sbx.prt_if2_tech_questionnaire_status;
-create table &db_sbx.prt_if2_tech_questionnaire_status
+-- Откуда: готовая tech_questionnaire_status, по уточнённому ФТ; исходные данные — результат 1.5.
+-- Зачем: взять готовый RK анкеты из TQS, сохранив подготовленные статусы и все application_num.
+-- Копирование: в финальной сборке TQS заменить источник RK на готовую TQS; убрать повторы пар ID/RK.
+drop table if exists &db_sbx.man_prt_tif_tech_questionnaire_status;
+create table &db_sbx.man_prt_tif_tech_questionnaire_status
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
 select
-    cast(tqx.questionnaire_rk as bigint) as questionnaire_rk,
+    cast(tqs.questionnaire_rk as bigint) as questionnaire_rk,
     base.questionnaire_id,
     base.questionnaire_dttm,
     base.utmcn_info,
@@ -500,24 +507,26 @@ select
     base.effective_from_dttm,
     base.application_num,
     cast(lead(base.effective_from_dttm, 1, cast(&p_max_date as timestamp)) over (
-        partition by tqx.questionnaire_rk order by base.effective_from_dttm
+        partition by tqs.questionnaire_rk order by base.effective_from_dttm
     ) as timestamp) as effective_to_dttm,
     cast(&p_report_timestamp as timestamp) as processed_dttm
-from &db_sbx.prt_if2_tqs_questionnaire_all base
+from &db_sbx.man_prt_tif_tqs_questionnaire_all base
 inner join (
     select questionnaire_id, questionnaire_rk
-    from &p_db_cdmr.tech_questionnaire_x_customer
+    from &p_db_cdmr.tech_questionnaire_status
     where effective_to_dttm = cast(&p_max_date as timestamp)
+      and questionnaire_rk is not null
+      and questionnaire_rk <> -1
     group by 1, 2
-) tqx on tqx.questionnaire_id = base.questionnaire_id
+) tqs on tqs.questionnaire_id = base.questionnaire_id
 ) distributed randomly;
 
--- Шаг 1.7. Флаг верификации КН/КК по всей истории TQS.
+-- Шаг 1.7. Предварительный флаг верификации КН/КК по всей истории TQS.
 -- Откуда: новый шаг; MAX(CASE) взят из стиля флагов tech_application_status, статусы — из выделений Excel.
--- Зачем: найти когда-либо пройденную верификацию и передать флаг вместе с каждым application_num дальше.
+-- Зачем: рассчитать флаг для анкет без связи; при найденной связи шаг 1.11 установит true.
 -- Копирование: это добавляемый шаг, целиком из TQS его скопировать нельзя.
-drop table if exists &db_sbx.prt_if2_kn_kk_verification;
-create table &db_sbx.prt_if2_kn_kk_verification
+drop table if exists &db_sbx.man_prt_tif_kn_kk_verification;
+create table &db_sbx.man_prt_tif_kn_kk_verification
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
@@ -533,7 +542,7 @@ select
         when level25_product_bp_nm = cast(&p_quest_25lvl_product_kk_list as text)
          and status_cd in (&p_kk_verification_status) then 1
         else 0 end) as quest_verification_flg
-from &db_sbx.prt_if2_tech_questionnaire_status
+from &db_sbx.man_prt_tif_tech_questionnaire_status
 group by 1, 2
 )
 select
@@ -558,58 +567,91 @@ select
     q.effective_to_dttm,
     q.processed_dttm,
     cast(v.quest_verification_flg as boolean) as quest_verification_flg
-from &db_sbx.prt_if2_tech_questionnaire_status q
+from &db_sbx.man_prt_tif_tech_questionnaire_status q
 inner join verification v
     on v.questionnaire_rk = q.questionnaire_rk
    and v.level25_product_bp_nm = q.level25_product_bp_nm
 ) distributed randomly;
 
--- Шаг 1.8. Последний шаг анкет -> BDM по application_num.
--- Откуда: новый шаг по ранее описанной связке и примеру соединения с bdm.application.
--- Зачем: использовать все номера истории после вычисления флага; не повторять один номер на каждом статусе.
--- Копирование: можно взять показанный JOIN анкет с BDM; LEFT JOIN сохраняет анкету без найденной заявки.
-drop table if exists &db_sbx.prt_if2_kn_kk_bdm;
-create table &db_sbx.prt_if2_kn_kk_bdm
+-- Шаг 1.8. Одна анкета КН/КК после расчёта флага по истории.
+-- Откуда: история 1.7; итоговая витрина по ФТ не хранит версии статусов.
+-- Зачем: сохранить все анкеты, включая не имеющие application_num; агрегировать историю, не строки TAS.
+drop table if exists &db_sbx.man_prt_tif_kn_kk_questionnaire;
+create table &db_sbx.man_prt_tif_kn_kk_questionnaire
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
-select distinct
-    q.questionnaire_id,
+select
     q.questionnaire_rk,
-    q.questionnaire_dttm,
-    q.quest_verification_flg,
     q.level25_product_bp_nm,
-    q.application_num,
-    app.application_rk as bdm_application_rk,
-    app.src_cd as bdm_src_cd
-from &db_sbx.prt_if2_kn_kk_verification q
-left join &p_db_bdm.application app
-    on q.application_num = app.application_num
-   and app.effective_to_date = cast(&p_max_date as date)
-   and app.application_begin_date >= cast(&P_BEGIN_DATE as date)
-   and app.application_rk is not null and app.application_rk <> -1
-   and (app.src_cd = &P_UZ_SRC
-        or (q.level25_product_bp_nm = cast(&p_quest_25lvl_product_kn_list as text) and app.src_cd = &P_KN_SRC)
-        or (q.level25_product_bp_nm = cast(&p_quest_25lvl_product_kk_list as text) and app.src_cd in (&P_KK_SRC)))
-where q.questionnaire_dttm >= cast(&P_BEGIN_DATE as timestamp)
-   or q.questionnaire_dttm is null
+    min(q.questionnaire_dttm) as questionnaire_dttm,
+    cast(max(cast(q.quest_verification_flg as integer)) as boolean) as quest_verification_flg
+from &db_sbx.man_prt_tif_kn_kk_verification q
+group by q.questionnaire_rk, q.level25_product_bp_nm
+having min(q.questionnaire_dttm) >= cast(&P_BEGIN_DATE as timestamp)
+    or min(q.questionnaire_dttm) is null
 ) distributed randomly;
 
--- Шаг 1.9. Новый источник: готовая TAS КН/КК и УЗ.
--- Откуда: tech_application_status из предоставленного DDL; её флаги уже рассчитаны исходным прототипом.
--- Зачем: выбрать атрибуты второй стороны, в том числе заявки без анкеты и УЗ без дочерней заявки.
--- Копирование: новая выборка готовой TAS, её исходный ETL целиком копировать не требуется.
-drop table if exists &db_sbx.prt_if2_kn_kk_tas;
-create table &db_sbx.prt_if2_kn_kk_tas
+-- Шаг 1.9. Все номера анкеты, пережившие исходную дедупликацию.
+-- Откуда: application_num из исходной цепочки TQS; ключ связи — анкета, продукт, номер.
+-- Зачем: один номер не должен повторяться из-за статусов; разные номера сохраняются.
+drop table if exists &db_sbx.man_prt_tif_kn_kk_numbers;
+create table &db_sbx.man_prt_tif_kn_kk_numbers
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
-select distinct
-    nullif(t.parent_application_rk, -1) as parent_application_rk,
+select
+    q.questionnaire_rk,
+    q.level25_product_bp_nm,
+    q.application_num
+from &db_sbx.man_prt_tif_kn_kk_verification q
+inner join &db_sbx.man_prt_tif_kn_kk_questionnaire b
+    on b.questionnaire_rk = q.questionnaire_rk
+   and b.level25_product_bp_nm = q.level25_product_bp_nm
+where q.application_num is not null
+group by q.questionnaire_rk, q.level25_product_bp_nm, q.application_num
+) distributed randomly;
+
+-- Шаг 1.10. application_num -> ключ BDM.APPLICATION.
+-- Откуда: ФТ 1.2, строка 4; источник ключа далее сравнивается с parent_src_cd TAS.
+-- Зачем: свернуть только повтор одной связи через разные номера; не выбирать случайную заявку.
+drop table if exists &db_sbx.man_prt_tif_kn_kk_bdm;
+create table &db_sbx.man_prt_tif_kn_kk_bdm
+with (APPENDONLY = true,
+      ORIENTATION = column,
+      COMPRESSTYPE = zstd,
+      COMPRESSLEVEL = 5)
+as (
+select
+    q.questionnaire_rk,
+    q.level25_product_bp_nm,
+    app.application_rk as bdm_application_rk,
+    app.src_cd as bdm_src_cd
+from &db_sbx.man_prt_tif_kn_kk_numbers q
+inner join &p_db_bdm.application app
+    on app.application_num = q.application_num
+   and app.effective_to_date = cast(&p_max_date as date)
+   and app.application_rk is not null
+   and app.application_rk <> -1
+group by q.questionnaire_rk, q.level25_product_bp_nm, app.application_rk, app.src_cd
+) distributed randomly;
+
+-- Шаг 1.11. Готовая TAS КН/КК без удаления дублей.
+-- Откуда: TAS, предоставленный состав 22 полей; отбор по продуктам из ФТ 1.2.1.
+-- Зачем: сохранить все исходные строки; DISTINCT не должен скрывать нарушение ключа TAS.
+drop table if exists &db_sbx.man_prt_tif_kn_kk_tas;
+create table &db_sbx.man_prt_tif_kn_kk_tas
+with (APPENDONLY = true,
+      ORIENTATION = column,
+      COMPRESSTYPE = zstd,
+      COMPRESSLEVEL = 5)
+as (
+select
+    coalesce(t.parent_application_rk, -1) as parent_application_rk,
     t.parent_application_id,
     t.parent_application_dt,
     t.parent_src_cd,
@@ -618,7 +660,7 @@ select distinct
     cast(t.parent_prescoring_flg as boolean) as parent_prescoring_flg,
     cast(t.parent_at_work_flg as boolean) as parent_at_work_flg,
     cast(t.parent_approved_flg as boolean) as parent_approved_flg,
-    nullif(t.application_rk, -1) as application_rk,
+    coalesce(t.application_rk, -1) as application_rk,
     t.application_id,
     t.application_dt,
     t.src_cd,
@@ -632,164 +674,89 @@ select distinct
     t.level35_product_bp_nm,
     t.processed_dttm
 from &p_db_cdmr.tech_application_status t
-where (t.src_cd in (&P_KN_SRC, &P_KK_SRC, &P_UZ_SRC)
-       or (t.src_cd is null and t.parent_src_cd = &P_UZ_SRC))
+where (t.level25_product_bp_nm in (&p_quest_25lvl_product_kn_list, &p_quest_25lvl_product_kk_list)
+       or (t.level25_product_bp_nm is null and exists (
+           select 1 from &db_sbx.man_prt_tif_kn_kk_bdm q
+           where q.bdm_application_rk = t.parent_application_rk
+             and q.bdm_src_cd = t.parent_src_cd
+       )))
   and (coalesce(t.application_dt, t.parent_application_dt) >= cast(&P_BEGIN_DATE as date)
        or coalesce(t.application_dt, t.parent_application_dt) is null)
+  and (coalesce(t.parent_application_rk, -1) <> -1
+       or coalesce(t.application_rk, -1) <> -1)
 ) distributed randomly;
 
--- Шаг 1.10. Соединение с TAS по ключу, полученному через BDM.
--- Откуда: новый шаг по требованиям: прямой RK продуктовой заявки либо RK универсальной заявки.
--- Зачем: получить связанные пары; один и тот же результат разных номеров/путей оставить один раз.
--- Копирование: новый JOIN; режим DIRECT/UZ/ALL задаёт уже исследуемый способ связи.
-drop table if exists &db_sbx.prt_if2_kn_kk_matches;
-create table &db_sbx.prt_if2_kn_kk_matches
+-- Шаг 1.12. Единственное соединение BDM -> родительский ключ TAS.
+-- Откуда: ФТ 1.2.4: app.application_rk = tas.parent_application_rk; совпадение источников.
+-- Зачем: получить ключи найденных пар; прямой путь на tas.application_rk исключён.
+drop table if exists &db_sbx.man_prt_tif_kn_kk_matches;
+create table &db_sbx.man_prt_tif_kn_kk_matches
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
-select distinct
-    q.questionnaire_id as q_questionnaire_id,
-    q.questionnaire_rk as q_questionnaire_rk,
-    q.questionnaire_dttm as q_questionnaire_dttm,
-    q.quest_verification_flg as q_quest_verification_flg,
-    q.level25_product_bp_nm as q_level25_product_bp_nm,
-    t.parent_application_rk as tas_parent_application_rk,
-    t.parent_application_id as tas_parent_application_id,
-    t.parent_application_dt as tas_parent_application_dt,
-    t.parent_src_cd as tas_parent_src_cd,
-    t.parent_approved_dttm as tas_parent_approved_dttm,
-    t.parent_open_flg as tas_parent_open_flg,
-    t.parent_prescoring_flg as tas_parent_prescoring_flg,
-    t.parent_at_work_flg as tas_parent_at_work_flg,
-    t.parent_approved_flg as tas_parent_approved_flg,
-    t.application_rk as tas_application_rk,
-    t.application_id as tas_application_id,
-    t.application_dt as tas_application_dt,
-    t.src_cd as tas_src_cd,
-    t.application_type_cd as tas_application_type_cd,
-    t.deal_issue_date as tas_deal_issue_date,
-    t.create_flg as tas_create_flg,
-    t.at_work_flg as tas_at_work_flg,
-    t.final_approved_flg as tas_final_approved_flg,
-    t.agr_signed_flg as tas_agr_signed_flg,
-    t.level25_product_bp_nm as tas_level25_product_bp_nm,
-    t.level35_product_bp_nm as tas_level35_product_bp_nm,
-    t.processed_dttm as tas_processed_dttm
-from &db_sbx.prt_if2_kn_kk_bdm q
-inner join &db_sbx.prt_if2_kn_kk_tas t
-    on (cast(&p_kn_kk_link_mode as text) in ('ALL', 'DIRECT')
-        and q.bdm_src_cd <> &P_UZ_SRC
-        and t.application_rk = q.bdm_application_rk and t.src_cd = q.bdm_src_cd)
-    or (cast(&p_kn_kk_link_mode as text) in ('ALL', 'UZ')
-        and q.bdm_src_cd = &P_UZ_SRC
-        and ((t.parent_application_rk = q.bdm_application_rk and t.parent_src_cd = &P_UZ_SRC
-              and ((q.level25_product_bp_nm = cast(&p_quest_25lvl_product_kn_list as text) and t.src_cd = &P_KN_SRC)
-                   or (q.level25_product_bp_nm = cast(&p_quest_25lvl_product_kk_list as text) and t.src_cd in (&P_KK_SRC))
-                   or t.src_cd is null))
-             or (t.application_rk = q.bdm_application_rk and t.src_cd = &P_UZ_SRC)))
+select
+    q.questionnaire_rk,
+    q.level25_product_bp_nm,
+    t.parent_application_rk,
+    t.application_rk
+from &db_sbx.man_prt_tif_kn_kk_bdm q
+inner join &db_sbx.man_prt_tif_kn_kk_tas t
+    on q.bdm_application_rk = t.parent_application_rk
+   and q.bdm_src_cd = t.parent_src_cd
+group by q.questionnaire_rk, q.level25_product_bp_nm,
+         t.parent_application_rk, t.application_rk
 ) distributed randomly;
 
--- Шаг 1.11. Итог ветки КН/КК: пары и обе стороны без пары.
--- Откуда: новый шаг из требования сохранить анкеты и заявки, даже если связка не найдена.
--- Зачем: одна анкета без связи выводится один раз, а не по числу её исторических номеров.
--- Копирование: новая сборка: связанные пары + NOT EXISTS для каждой несвязанной стороны.
-drop table if exists &db_sbx.prt_if2_kn_kk_fin;
-create table &db_sbx.prt_if2_kn_kk_fin
+-- Шаг 1.13. Анкеты КН/КК и найденные заявки через LEFT JOIN.
+-- Откуда: ФТ: анкеты без заявки сохраняются; наличие связи устанавливает флаг true.
+-- Зачем: каждую анкету без связи вывести один раз; заявки без анкеты будут добавлены только в 3.2.
+drop table if exists &db_sbx.man_prt_tif_kn_kk_fin;
+create table &db_sbx.man_prt_tif_kn_kk_fin
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
-select distinct
-    cast(m.q_questionnaire_rk as bigint) as questionnaire_rk,
-    cast(m.q_questionnaire_dttm as timestamp) as questionnaire_dttm,
-    cast(m.q_quest_verification_flg as boolean) as quest_verification_flg,
-    cast(m.tas_parent_application_rk as bigint) as parent_application_rk,
-    cast(m.tas_parent_application_dt as date) as parent_application_dt,
-    cast(m.tas_parent_open_flg as boolean) as parent_open_flg,
-    cast(m.tas_parent_prescoring_flg as boolean) as parent_prescoring_flg,
-    cast(m.tas_parent_at_work_flg as boolean) as parent_at_work_flg,
-    cast(m.tas_parent_approved_flg as boolean) as parent_approved_flg,
-    cast(m.tas_application_rk as bigint) as application_rk,
-    cast(m.tas_application_dt as date) as application_dt,
-    cast(m.tas_deal_issue_date as date) as deal_issue_date,
-    cast(m.tas_create_flg as boolean) as create_flg,
-    cast(m.tas_at_work_flg as boolean) as at_work_flg,
-    cast(m.tas_final_approved_flg as boolean) as final_approved_flg,
-    cast(m.tas_agr_signed_flg as boolean) as agr_signed_flg,
-    cast(coalesce(m.tas_level25_product_bp_nm, m.q_level25_product_bp_nm) as text) as level25_product_bp_nm,
-    cast(coalesce(m.tas_level25_product_bp_nm, m.q_level25_product_bp_nm) as text) as level35_product_bp_nm,
-    cast(&p_report_timestamp as timestamp(0)) as processed_dttm
-from &db_sbx.prt_if2_kn_kk_matches m
-union all
-select distinct
+select
     cast(q.questionnaire_rk as bigint) as questionnaire_rk,
     cast(q.questionnaire_dttm as timestamp) as questionnaire_dttm,
-    cast(q.quest_verification_flg as boolean) as quest_verification_flg,
-    cast(null as bigint) as parent_application_rk,
-    cast(null as date) as parent_application_dt,
-    cast(null as boolean) as parent_open_flg,
-    cast(null as boolean) as parent_prescoring_flg,
-    cast(null as boolean) as parent_at_work_flg,
-    cast(null as boolean) as parent_approved_flg,
-    cast(null as bigint) as application_rk,
-    cast(null as date) as application_dt,
-    cast(null as date) as deal_issue_date,
-    cast(null as boolean) as create_flg,
-    cast(null as boolean) as at_work_flg,
-    cast(null as boolean) as final_approved_flg,
-    cast(null as boolean) as agr_signed_flg,
-    cast(coalesce(null, q.level25_product_bp_nm) as text) as level25_product_bp_nm,
-    cast(coalesce(null, q.level25_product_bp_nm) as text) as level35_product_bp_nm,
-    cast(&p_report_timestamp as timestamp(0)) as processed_dttm
-from &db_sbx.prt_if2_kn_kk_bdm q
-where not exists (
-    select 1 from &db_sbx.prt_if2_kn_kk_matches m
-    where m.q_questionnaire_rk = q.questionnaire_rk
-      and m.q_questionnaire_id = q.questionnaire_id
-      and m.q_level25_product_bp_nm = q.level25_product_bp_nm
-)
-union all
-select distinct
-    cast(null as bigint) as questionnaire_rk,
-    cast(null as timestamp) as questionnaire_dttm,
-    cast(null as boolean) as quest_verification_flg,
-    cast(t.parent_application_rk as bigint) as parent_application_rk,
+    cast(case
+        when t.parent_application_rk is not null or t.application_rk is not null then true
+        else q.quest_verification_flg
+    end as boolean) as quest_verification_flg,
+    cast(coalesce(t.parent_application_rk, -1) as bigint) as parent_application_rk,
     cast(t.parent_application_dt as date) as parent_application_dt,
     cast(t.parent_open_flg as boolean) as parent_open_flg,
     cast(t.parent_prescoring_flg as boolean) as parent_prescoring_flg,
     cast(t.parent_at_work_flg as boolean) as parent_at_work_flg,
     cast(t.parent_approved_flg as boolean) as parent_approved_flg,
-    cast(t.application_rk as bigint) as application_rk,
+    cast(coalesce(t.application_rk, -1) as bigint) as application_rk,
     cast(t.application_dt as date) as application_dt,
     cast(t.deal_issue_date as date) as deal_issue_date,
     cast(t.create_flg as boolean) as create_flg,
     cast(t.at_work_flg as boolean) as at_work_flg,
     cast(t.final_approved_flg as boolean) as final_approved_flg,
     cast(t.agr_signed_flg as boolean) as agr_signed_flg,
-    cast(coalesce(t.level25_product_bp_nm, null) as text) as level25_product_bp_nm,
-    cast(coalesce(t.level25_product_bp_nm, null) as text) as level35_product_bp_nm,
+    cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level25_product_bp_nm,
+    cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
-from &db_sbx.prt_if2_kn_kk_tas t
-where not exists (
-    select 1 from &db_sbx.prt_if2_kn_kk_matches m
-    where m.tas_parent_application_rk is not distinct from t.parent_application_rk
-      and m.tas_parent_src_cd is not distinct from t.parent_src_cd
-      and m.tas_application_rk is not distinct from t.application_rk
-      and m.tas_src_cd is not distinct from t.src_cd
-)
+from &db_sbx.man_prt_tif_kn_kk_questionnaire q
+left join &db_sbx.man_prt_tif_kn_kk_matches m
+    on m.questionnaire_rk = q.questionnaire_rk
+   and m.level25_product_bp_nm = q.level25_product_bp_nm
+left join &db_sbx.man_prt_tif_kn_kk_tas t
+    on t.parent_application_rk = m.parent_application_rk
+   and t.application_rk = m.application_rk
 ) distributed randomly;
 
--- ==================== 2. АВТО: ГОТОВАЯ TQS -> ФЛАГ -> TAS ====================
-
--- Шаг 2.1. Готовая TQS авто и флаг верификации по истории.
+-- Шаг 2.1. Готовая TQS авто и предварительный флаг верификации по истории.
 -- Откуда: tech_questionnaire_status напрямую; MAX(CASE) — стиль флагов tech_application_status.
 -- Зачем: не копировать RAW-цепочку авто; учесть любой выделенный статус, а не только текущую версию.
 -- Копирование: новая агрегация готовой TQS; имена status_cd/RK/даты/продукта — из её DDL.
-drop table if exists &db_sbx.prt_if2_auto_verification;
-create table &db_sbx.prt_if2_auto_verification
+drop table if exists &db_sbx.man_prt_tif_auto_verification;
+create table &db_sbx.man_prt_tif_auto_verification
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
@@ -804,24 +771,25 @@ select
     q.level25_product_bp_nm
 from &p_db_cdmr.tech_questionnaire_status q
 where q.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
+  and q.questionnaire_rk is not null
+  and q.questionnaire_rk <> -1
 group by q.questionnaire_id, q.questionnaire_rk, q.level25_product_bp_nm
 having min(q.questionnaire_dttm) >= cast(&P_BEGIN_DATE as timestamp)
     or min(q.questionnaire_dttm) is null
 ) distributed randomly;
 
--- Шаг 2.2. Готовая TAS автокредитов.
--- Откуда: tech_application_status, источник автокредитов из исходных макропеременных TAS.
--- Зачем: взять заявочные атрибуты и сохранить авто-заявки без анкеты.
--- Копирование: можно скопировать выборку 1.9, заменив условие источника на P_AUTO_SRC.
-drop table if exists &db_sbx.prt_if2_auto_tas;
-create table &db_sbx.prt_if2_auto_tas
+-- Шаг 2.2. Готовая TAS авто без удаления дублей.
+-- Откуда: TAS, предоставленный состав 22 полей; продукт из ФТ 1.2.1.
+-- Зачем: сохранить исходные строки; отсутствие временных полей TAS не заменяется processed_dttm.
+drop table if exists &db_sbx.man_prt_tif_auto_tas;
+create table &db_sbx.man_prt_tif_auto_tas
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
-select distinct
-    nullif(t.parent_application_rk, -1) as parent_application_rk,
+select
+    coalesce(t.parent_application_rk, -1) as parent_application_rk,
     t.parent_application_id,
     t.parent_application_dt,
     t.parent_src_cd,
@@ -830,7 +798,7 @@ select distinct
     cast(t.parent_prescoring_flg as boolean) as parent_prescoring_flg,
     cast(t.parent_at_work_flg as boolean) as parent_at_work_flg,
     cast(t.parent_approved_flg as boolean) as parent_approved_flg,
-    nullif(t.application_rk, -1) as application_rk,
+    coalesce(t.application_rk, -1) as application_rk,
     t.application_id,
     t.application_dt,
     t.src_cd,
@@ -844,33 +812,41 @@ select distinct
     t.level35_product_bp_nm,
     t.processed_dttm
 from &p_db_cdmr.tech_application_status t
-where t.src_cd = &P_AUTO_SRC
+where (t.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
+       or (t.level25_product_bp_nm is null and exists (
+           select 1 from &db_sbx.man_prt_tif_auto_verification q
+           where q.questionnaire_id = t.application_id
+       )))
   and (coalesce(t.application_dt, t.parent_application_dt) >= cast(&P_BEGIN_DATE as date)
        or coalesce(t.application_dt, t.parent_application_dt) is null)
+  and (coalesce(t.parent_application_rk, -1) <> -1
+       or coalesce(t.application_rk, -1) <> -1)
 ) distributed randomly;
 
--- Шаг 2.3. Связь авто по questionnaire_id = application_id.
--- Откуда: прямое равенство ID из требований, флаги и даты заявки — из готовой TAS.
--- Зачем: сохранить связанные пары, анкеты без заявки и заявки без анкеты через FULL JOIN.
--- Копирование: новый FULL JOIN двух последних шагов авто; исходные RK не генерируются.
-drop table if exists &db_sbx.prt_if2_auto_fin;
-create table &db_sbx.prt_if2_auto_fin
+-- Шаг 2.3. Анкеты авто и найденные заявки через LEFT JOIN.
+-- Откуда: ФТ 1.2.3: questionnaire_id = application_id. Правило версий требует уточнения.
+-- Зачем: сохранить анкетную сторону; остаток TAS добавляется отдельно, не через FULL JOIN.
+drop table if exists &db_sbx.man_prt_tif_auto_fin;
+create table &db_sbx.man_prt_tif_auto_fin
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
-select distinct
+select
     cast(q.questionnaire_rk as bigint) as questionnaire_rk,
     cast(q.questionnaire_dttm as timestamp) as questionnaire_dttm,
-    cast(q.quest_verification_flg as boolean) as quest_verification_flg,
-    cast(t.parent_application_rk as bigint) as parent_application_rk,
+    cast(case
+        when t.parent_application_rk is not null or t.application_rk is not null then true
+        else q.quest_verification_flg
+    end as boolean) as quest_verification_flg,
+    cast(coalesce(t.parent_application_rk, -1) as bigint) as parent_application_rk,
     cast(t.parent_application_dt as date) as parent_application_dt,
     cast(t.parent_open_flg as boolean) as parent_open_flg,
     cast(t.parent_prescoring_flg as boolean) as parent_prescoring_flg,
     cast(t.parent_at_work_flg as boolean) as parent_at_work_flg,
     cast(t.parent_approved_flg as boolean) as parent_approved_flg,
-    cast(t.application_rk as bigint) as application_rk,
+    cast(coalesce(t.application_rk, -1) as bigint) as application_rk,
     cast(t.application_dt as date) as application_dt,
     cast(t.deal_issue_date as date) as deal_issue_date,
     cast(t.create_flg as boolean) as create_flg,
@@ -880,19 +856,16 @@ select distinct
     cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level25_product_bp_nm,
     cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
-from &db_sbx.prt_if2_auto_verification q
-full join &db_sbx.prt_if2_auto_tas t
+from &db_sbx.man_prt_tif_auto_verification q
+left join &db_sbx.man_prt_tif_auto_tas t
     on q.questionnaire_id = t.application_id
 ) distributed randomly;
 
--- ==================== 3. ОБЪЕДИНЕНИЕ ДВУХ ВЕТОК ====================
-
--- Шаг 3.1. Единая витрина из 19 согласованных атрибутов.
--- Откуда: два итоговых шага КН/КК и авто; атрибутивный состав — из функциональных требований.
--- Зачем: объединить ветки в одном формате; оба уровня продукта рассчитаны одинаково.
--- Копирование: новый UNION ALL; прежний прототип и его результаты этим SQL не затрагиваются.
-drop table if exists &db_sbx.prt_if2_tech_internet_funnel;
-create table &db_sbx.prt_if2_tech_internet_funnel
+-- Шаг 3.1. Первая таблица: все анкеты с найденными заявками или без них.
+-- Откуда: результаты 1.13 и 2.3; ФТ 1.2.5 требует исключить повторное добавление связанных заявок.
+-- Зачем: сформировать анкетную часть, относительно которой проверяется остаток TAS.
+drop table if exists &db_sbx.man_prt_tif_questionnaire_funnel;
+create table &db_sbx.man_prt_tif_questionnaire_funnel
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
@@ -918,7 +891,7 @@ select
     k.level25_product_bp_nm,
     k.level35_product_bp_nm,
     k.processed_dttm
-from &db_sbx.prt_if2_kn_kk_fin k
+from &db_sbx.man_prt_tif_kn_kk_fin k
 union all
 select
     a.questionnaire_rk,
@@ -940,94 +913,150 @@ select
     a.level25_product_bp_nm,
     a.level35_product_bp_nm,
     a.processed_dttm
-from &db_sbx.prt_if2_auto_fin a
+from &db_sbx.man_prt_tif_auto_fin a
 ) distributed randomly;
 
--- Шаг 3.2. Одна строка на RK анкеты и признак найденной связи.
--- Откуда: расчёт покрытия уже построенной витрины; исправление ошибки high VMEM usage.
--- Зачем: заменить несколько одновременных DISTINCT одной группировкой по RK анкеты.
--- Копирование: новый расчёт показателей; подготовка источников и связки не меняются.
-drop table if exists &db_sbx.prt_if2_coverage_questionnaires;
-create table &db_sbx.prt_if2_coverage_questionnaires
+-- Шаг 3.2. Только заявки TAS, не попавшие в первую таблицу.
+-- Откуда: ФТ 1.2.5: исключить заявки, уже соединившиеся с анкетами.
+-- Зачем: NOT EXISTS по полному ключу TAS; дочерние заявки одной УЗ не исключают друг друга.
+drop table if exists &db_sbx.man_prt_tif_remaining_tas;
+create table &db_sbx.man_prt_tif_remaining_tas
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
+with tas as (
 select
-    questionnaire_rk,
-    max(case when parent_application_rk is not null or application_rk is not null
-             then 1 else 0 end) as linked_flg
-from &db_sbx.prt_if2_tech_internet_funnel
-where questionnaire_rk is not null
-group by questionnaire_rk
-) distributed by (questionnaire_rk);
-
--- Шаг 3.3. Счётчики уникальных анкет из подготовленной группировки.
--- Откуда: расчёт покрытия уже построенной витрины; исправление ошибки high VMEM usage.
--- Зачем: получить одну строку COUNT/SUM без DISTINCT и освободить агрегацию перед подсчётом заявок.
--- Копирование: новый расчёт показателей; подготовка источников и связки не меняются.
-drop table if exists &db_sbx.prt_if2_coverage_questionnaire_counts;
-create table &db_sbx.prt_if2_coverage_questionnaire_counts
-with (APPENDONLY = true,
-      ORIENTATION = column,
-      COMPRESSTYPE = zstd,
-      COMPRESSLEVEL = 5)
-as (
+    k.parent_application_rk,
+    k.parent_application_id,
+    k.parent_application_dt,
+    k.parent_src_cd,
+    k.parent_approved_dttm,
+    k.parent_open_flg,
+    k.parent_prescoring_flg,
+    k.parent_at_work_flg,
+    k.parent_approved_flg,
+    k.application_rk,
+    k.application_id,
+    k.application_dt,
+    k.src_cd,
+    k.application_type_cd,
+    k.deal_issue_date,
+    k.create_flg,
+    k.at_work_flg,
+    k.final_approved_flg,
+    k.agr_signed_flg,
+    k.level25_product_bp_nm,
+    k.level35_product_bp_nm,
+    k.processed_dttm
+from &db_sbx.man_prt_tif_kn_kk_tas k
+union all
 select
-    count(*) as questionnaire_count,
-    cast(coalesce(sum(linked_flg), 0) as bigint) as linked_questionnaire_count
-from &db_sbx.prt_if2_coverage_questionnaires
+    a.parent_application_rk,
+    a.parent_application_id,
+    a.parent_application_dt,
+    a.parent_src_cd,
+    a.parent_approved_dttm,
+    a.parent_open_flg,
+    a.parent_prescoring_flg,
+    a.parent_at_work_flg,
+    a.parent_approved_flg,
+    a.application_rk,
+    a.application_id,
+    a.application_dt,
+    a.src_cd,
+    a.application_type_cd,
+    a.deal_issue_date,
+    a.create_flg,
+    a.at_work_flg,
+    a.final_approved_flg,
+    a.agr_signed_flg,
+    a.level25_product_bp_nm,
+    a.level35_product_bp_nm,
+    a.processed_dttm
+from &db_sbx.man_prt_tif_auto_tas a
+)
+select
+    cast(-1 as bigint) as questionnaire_rk,
+    cast(null as timestamp) as questionnaire_dttm,
+    cast(null as boolean) as quest_verification_flg,
+    cast(coalesce(t.parent_application_rk, -1) as bigint) as parent_application_rk,
+    cast(t.parent_application_dt as date) as parent_application_dt,
+    cast(t.parent_open_flg as boolean) as parent_open_flg,
+    cast(t.parent_prescoring_flg as boolean) as parent_prescoring_flg,
+    cast(t.parent_at_work_flg as boolean) as parent_at_work_flg,
+    cast(t.parent_approved_flg as boolean) as parent_approved_flg,
+    cast(coalesce(t.application_rk, -1) as bigint) as application_rk,
+    cast(t.application_dt as date) as application_dt,
+    cast(t.deal_issue_date as date) as deal_issue_date,
+    cast(t.create_flg as boolean) as create_flg,
+    cast(t.at_work_flg as boolean) as at_work_flg,
+    cast(t.final_approved_flg as boolean) as final_approved_flg,
+    cast(t.agr_signed_flg as boolean) as agr_signed_flg,
+    cast(t.level25_product_bp_nm as text) as level25_product_bp_nm,
+    cast(t.level25_product_bp_nm as text) as level35_product_bp_nm,
+    cast(&p_report_timestamp as timestamp(0)) as processed_dttm
+from tas t
+where not exists (
+    select 1
+    from &db_sbx.man_prt_tif_questionnaire_funnel f
+    where f.parent_application_rk = t.parent_application_rk
+      and f.application_rk = t.application_rk
+)
 ) distributed randomly;
 
--- Шаг 3.4. Одна строка на пару RK заявки и признак найденной анкеты.
--- Откуда: расчёт покрытия уже построенной витрины; исправление ошибки high VMEM usage.
--- Зачем: группировать два bigint вместо DISTINCT составного ROW; распределять по обоим RK.
--- Копирование: новый расчёт показателей; подготовка источников и связки не меняются.
-drop table if exists &db_sbx.prt_if2_coverage_applications;
-create table &db_sbx.prt_if2_coverage_applications
+-- Шаг 3.3. Итог: первая таблица плюс только оставшиеся заявки.
+-- Откуда: ФТ, 19 итоговых атрибутов; наборы разделены условием NOT EXISTS в 3.2.
+-- Зачем: исключить повторное добавление связанной заявки без маскировки DISTINCT.
+drop table if exists &db_sbx.man_prt_tif_tech_internet_funnel;
+create table &db_sbx.man_prt_tif_tech_internet_funnel
 with (APPENDONLY = true,
       ORIENTATION = column,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
 select
-    parent_application_rk,
-    application_rk,
-    max(case when questionnaire_rk is not null then 1 else 0 end) as linked_flg
-from &db_sbx.prt_if2_tech_internet_funnel
-where parent_application_rk is not null or application_rk is not null
-group by parent_application_rk, application_rk
-) distributed by (parent_application_rk, application_rk);
-
--- Шаг 3.5. Счётчики уникальных заявочных пар из подготовленной группировки.
--- Откуда: расчёт покрытия уже построенной витрины; исправление ошибки high VMEM usage.
--- Зачем: получить одну строку COUNT/SUM без хранения ещё одного набора DISTINCT.
--- Копирование: новый расчёт показателей; подготовка источников и связки не меняются.
-drop table if exists &db_sbx.prt_if2_coverage_application_counts;
-create table &db_sbx.prt_if2_coverage_application_counts
-with (APPENDONLY = true,
-      ORIENTATION = column,
-      COMPRESSTYPE = zstd,
-      COMPRESSLEVEL = 5)
-as (
+    q.questionnaire_rk,
+    q.questionnaire_dttm,
+    q.quest_verification_flg,
+    q.parent_application_rk,
+    q.parent_application_dt,
+    q.parent_open_flg,
+    q.parent_prescoring_flg,
+    q.parent_at_work_flg,
+    q.parent_approved_flg,
+    q.application_rk,
+    q.application_dt,
+    q.deal_issue_date,
+    q.create_flg,
+    q.at_work_flg,
+    q.final_approved_flg,
+    q.agr_signed_flg,
+    q.level25_product_bp_nm,
+    q.level35_product_bp_nm,
+    q.processed_dttm
+from &db_sbx.man_prt_tif_questionnaire_funnel q
+union all
 select
-    count(*) as application_count,
-    cast(coalesce(sum(linked_flg), 0) as bigint) as linked_application_count
-from &db_sbx.prt_if2_coverage_applications
+    t.questionnaire_rk,
+    t.questionnaire_dttm,
+    t.quest_verification_flg,
+    t.parent_application_rk,
+    t.parent_application_dt,
+    t.parent_open_flg,
+    t.parent_prescoring_flg,
+    t.parent_at_work_flg,
+    t.parent_approved_flg,
+    t.application_rk,
+    t.application_dt,
+    t.deal_issue_date,
+    t.create_flg,
+    t.at_work_flg,
+    t.final_approved_flg,
+    t.agr_signed_flg,
+    t.level25_product_bp_nm,
+    t.level35_product_bp_nm,
+    t.processed_dttm
+from &db_sbx.man_prt_tif_remaining_tas t
 ) distributed randomly;
-
--- Шаг 3.6. Итоговый отчёт о связке из двух однострочных таблиц счётчиков.
--- Откуда: те же пять показателей прежнего запроса покрытия, без одновременных COUNT(DISTINCT).
--- Зачем: посчитать процент уже после группировок; CROSS JOIN здесь соединяет ровно две строки.
--- Заявочная сущность — пара parent_application_rk/application_rk, как до исправления.
--- Строки без обоих заявочных RK не входят в знаменатель заявок; NULL процента означает пустую базу анкет.
-select
-    q.questionnaire_count,
-    q.linked_questionnaire_count,
-    round(100.0 * q.linked_questionnaire_count / nullif(q.questionnaire_count, 0), 2)
-        as questionnaire_link_pct,
-    a.application_count,
-    a.linked_application_count
-from &db_sbx.prt_if2_coverage_questionnaire_counts q
-cross join &db_sbx.prt_if2_coverage_application_counts a;
