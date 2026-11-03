@@ -74,16 +74,16 @@ TQS-цепочка копируется только для КН/КК; для а
 не генерируются. Все номера переживших исходную дедупликацию статусов
 сохраняются и участвуют в связи. Версии не отбрасываются до расчёта флага.
 
-TAS читается как готовый актуальный снимок, как в предоставленном DDL.
-Поля окончания версии TAS не показано; processed_dttm не используется вместо него.
+TAS хранит только последнее состояние заявки: изменения переписывают строку.
+Временного JOIN с TAS нет; processed_dttm не используется как начало версии.
 КН/КК и авто сохраняют несвязанные анкеты и заявки внутри своих когорт.
-Правило level35 сохраняет последнее прямое уточнение пользователя: равно level25.
-В новом DOCX формулировка отличается; требуется подтверждение (см. документацию).
+level25 берётся из TAS, при NULL — из анкеты. level35 берётся из собственного
+поля TAS; если заявки или значения нет — NULL, как в ФТ 1.4.
 Правки и ограничения: docs/prototype_v4_steps.txt.
 КН/КК соединяются только по app.application_rk = tas.parent_application_rk
 и app.src_cd = tas.parent_src_cd. Прямого пути на tas.application_rk больше нет.
-Временное условие соединения авто не додумано: в ФТ нет полей/правила,
-а известный DDL TAS не содержит интервалов; уточнение запрошено.
+Для авто флаг рассчитывается по всей истории TQS; ID для связи берётся
+из текущего среза TQS после агрегации истории. Итог не хранит версии статусов.
 DISTINCT сохранён только в исходном RAW-этапе 1.1. Далее агрегируются
 номера/ключи связей, строки TAS и финальные атрибуты не дедуплицируются.
 Проверки: sql/check_internet_funnel.sql. Каждый SELECT выполняется отдельно.
@@ -740,7 +740,7 @@ select
     cast(t.final_approved_flg as boolean) as final_approved_flg,
     cast(t.agr_signed_flg as boolean) as agr_signed_flg,
     cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level25_product_bp_nm,
-    cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level35_product_bp_nm,
+    cast(t.level35_product_bp_nm as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
 from &db_sbx.man_prt_tif_kn_kk_questionnaire q
 left join &db_sbx.man_prt_tif_kn_kk_matches m
@@ -753,7 +753,7 @@ left join &db_sbx.man_prt_tif_kn_kk_tas t
 
 -- Шаг 2.1. Готовая TQS авто и предварительный флаг верификации по истории.
 -- Откуда: tech_questionnaire_status напрямую; MAX(CASE) — стиль флагов tech_application_status.
--- Зачем: не копировать RAW-цепочку авто; учесть любой выделенный статус, а не только текущую версию.
+-- Зачем: вычислить флаг по всей истории, затем получить актуальный ID анкеты для связи со снимком TAS.
 -- Копирование: новая агрегация готовой TQS; имена status_cd/RK/даты/продукта — из её DDL.
 drop table if exists &db_sbx.man_prt_tif_auto_verification;
 create table &db_sbx.man_prt_tif_auto_verification
@@ -762,8 +762,8 @@ with (APPENDONLY = true,
       COMPRESSTYPE = zstd,
       COMPRESSLEVEL = 5)
 as (
+with verification as (
 select
-    q.questionnaire_id,
     q.questionnaire_rk,
     min(q.questionnaire_dttm) as questionnaire_dttm,
     cast(max(case when q.status_cd in (&p_auto_verification_status) then 1 else 0 end) as boolean)
@@ -773,14 +773,36 @@ from &p_db_cdmr.tech_questionnaire_status q
 where q.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
   and q.questionnaire_rk is not null
   and q.questionnaire_rk <> -1
-group by q.questionnaire_id, q.questionnaire_rk, q.level25_product_bp_nm
+group by q.questionnaire_rk, q.level25_product_bp_nm
 having min(q.questionnaire_dttm) >= cast(&P_BEGIN_DATE as timestamp)
     or min(q.questionnaire_dttm) is null
+), current_ids as (
+select
+    q.questionnaire_id,
+    q.questionnaire_rk,
+    q.level25_product_bp_nm
+from &p_db_cdmr.tech_questionnaire_status q
+where q.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
+  and q.effective_to_dttm = cast(&p_max_date as timestamp)
+  and q.questionnaire_rk is not null
+  and q.questionnaire_rk <> -1
+group by q.questionnaire_id, q.questionnaire_rk, q.level25_product_bp_nm
+)
+select
+    q.questionnaire_id,
+    v.questionnaire_rk,
+    v.questionnaire_dttm,
+    v.quest_verification_flg,
+    v.level25_product_bp_nm
+from verification v
+inner join current_ids q
+    on q.questionnaire_rk = v.questionnaire_rk
+   and q.level25_product_bp_nm = v.level25_product_bp_nm
 ) distributed randomly;
 
 -- Шаг 2.2. Готовая TAS авто без удаления дублей.
 -- Откуда: TAS, предоставленный состав 22 полей; продукт из ФТ 1.2.1.
--- Зачем: сохранить исходные строки; отсутствие временных полей TAS не заменяется processed_dttm.
+-- Зачем: взять последнее состояние каждой заявки, которое хранит TAS; дополнительные версии не выбираются.
 drop table if exists &db_sbx.man_prt_tif_auto_tas;
 create table &db_sbx.man_prt_tif_auto_tas
 with (APPENDONLY = true,
@@ -824,7 +846,7 @@ where (t.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
 ) distributed randomly;
 
 -- Шаг 2.3. Анкеты авто и найденные заявки через LEFT JOIN.
--- Откуда: ФТ 1.2.3: questionnaire_id = application_id. Правило версий требует уточнения.
+-- Откуда: ФТ 1.2.3: актуальный questionnaire_id TQS = application_id снимка TAS.
 -- Зачем: сохранить анкетную сторону; остаток TAS добавляется отдельно, не через FULL JOIN.
 drop table if exists &db_sbx.man_prt_tif_auto_fin;
 create table &db_sbx.man_prt_tif_auto_fin
@@ -854,7 +876,7 @@ select
     cast(t.final_approved_flg as boolean) as final_approved_flg,
     cast(t.agr_signed_flg as boolean) as agr_signed_flg,
     cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level25_product_bp_nm,
-    cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level35_product_bp_nm,
+    cast(t.level35_product_bp_nm as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
 from &db_sbx.man_prt_tif_auto_verification q
 left join &db_sbx.man_prt_tif_auto_tas t
@@ -995,7 +1017,7 @@ select
     cast(t.final_approved_flg as boolean) as final_approved_flg,
     cast(t.agr_signed_flg as boolean) as agr_signed_flg,
     cast(t.level25_product_bp_nm as text) as level25_product_bp_nm,
-    cast(t.level25_product_bp_nm as text) as level35_product_bp_nm,
+    cast(t.level35_product_bp_nm as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
 from tas t
 where not exists (

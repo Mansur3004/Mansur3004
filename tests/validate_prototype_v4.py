@@ -136,7 +136,8 @@ def test_parent_mapping_and_residuals():
         assert reports[11]==[]
     assert [r[0] for r in rows(db,f'describe {FINAL}')]==FINAL_FIELDS
     assert rows(db,f'''select count(*) from {FINAL}
-                      where level25_product_bp_nm is distinct from level35_product_bp_nm''')==[(0,)]
+                      where parent_application_rk=-1 and application_rk=-1
+                        and level35_product_bp_nm is not null''')==[(0,)]
     print('PASS: parent-only mapping/source equality, old routes excluded, historical numbers, '
           'product scope, true-on-link, both unmatched sides, one residual per TAS key and rerun.')
 
@@ -241,6 +242,45 @@ def test_recalculation_cohort():
     print('PASS: initial and rolling-quarter calculation cohorts; old parent lookup remains available.')
 
 
+def test_current_auto_id_and_historical_verification():
+    db=db_new()
+    tqs(db,'OLD_AUTO_ID',201,'APPROVED',end='2025-02-01')
+    tqs(db,'CURRENT_AUTO_ID',201,'DRAFT',start='2025-02-01')
+    add_tas(db,501,'CURRENT_AUTO_ID','ALPP',level25_product_bp_nm='Автокредит')
+    add_tas(db,502,'OLD_AUTO_ID','ALPP',level25_product_bp_nm='Автокредит')
+    build(db)
+    assert rows(db,f'''select questionnaire_id,questionnaire_rk,quest_verification_flg
+                      from {S}.man_prt_tif_auto_verification''')==[('CURRENT_AUTO_ID',201,True)]
+    assert rows(db,f'''select questionnaire_rk,application_rk,quest_verification_flg
+                      from {FINAL} order by questionnaire_rk''')==[(-1,502,None),(201,501,True)]
+    print('PASS: current TQS ID joins latest TAS state; historical statuses still determine verification.')
+
+
+def test_native_level35():
+    db=db_new()
+    questionnaire(db,'KN_NATIVE35',101,num='ROOT')
+    bdm(db,401,'ROOT')
+    add_tas(db,301,'KN_CHILD','MSCL',401,
+            level25_product_bp_nm='Потребкредит',level35_product_bp_nm='SOURCE_KN_LEVEL35')
+    questionnaire(db,'KN_WITHOUT_APP',102)
+    tqs(db,'AUTO_NATIVE35',201)
+    add_tas(db,501,'AUTO_NATIVE35','ALPP',
+            level25_product_bp_nm='Автокредит',level35_product_bp_nm='SOURCE_AUTO_LEVEL35')
+    add_tas(db,502,'AUTO_ONLY','ALPP',
+            level25_product_bp_nm='Автокредит',level35_product_bp_nm='SOURCE_APP_ONLY_LEVEL35')
+    tqs(db,'AUTO_NULL35',202)
+    add_tas(db,503,'AUTO_NULL35','ALPP',level25_product_bp_nm='Автокредит',level35_product_bp_nm=None)
+    build(db)
+    assert rows(db,f'''select questionnaire_rk,application_rk,level35_product_bp_nm
+                      from {FINAL} order by questionnaire_rk,application_rk''')==[
+        (-1,502,'SOURCE_APP_ONLY_LEVEL35'),(101,301,'SOURCE_KN_LEVEL35'),
+        (102,-1,None),(201,501,'SOURCE_AUTO_LEVEL35'),(202,503,None)]
+    source=SCRIPT.read_text()
+    lines=[line for line in source.splitlines() if ' as level35_product_bp_nm' in line]
+    assert len(lines)==3 and all('t.level35_product_bp_nm' in line for line in lines)
+    print('PASS: native TAS level35 in linked and residual branches; no copy/fallback from level25.')
+
+
 if __name__=='__main__':
     test_parent_mapping_and_residuals()
     test_tas_duplicates_are_not_masked()
@@ -248,4 +288,6 @@ if __name__=='__main__':
     test_all_product_statuses()
     test_missing_tas_product_fallback()
     test_recalculation_cohort()
+    test_current_auto_id_and_historical_verification()
+    test_native_level35()
     print('Synthetic tests only; real Greenplum/source schemas remain unverified.')

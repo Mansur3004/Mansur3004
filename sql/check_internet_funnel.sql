@@ -11,8 +11,7 @@ from dm_pik_fd_cdmr.tech_questionnaire_status
 group by questionnaire_rk, effective_from_dttm
 having count(*) > 1;
 
--- 2. Повторы предоставленного ключа TAS. В известных 22 полях нет интервалов версий.
--- Если TAS тоже версионная, сначала уточнить полный ключ, не удалять эти строки DISTINCT.
+-- 2. TAS хранит последнее состояние; повторы пары ключей требуют разбора, не DISTINCT.
 select coalesce(parent_application_rk, -1) as parent_application_rk,
        coalesce(application_rk, -1) as application_rk, count(*) as row_count
 from dm_pik_fd_cdmr.tech_application_status
