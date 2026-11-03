@@ -4,6 +4,9 @@
 Результат: `&db_sbx.man_prt_tif_tech_internet_funnel`, 19 атрибутов.
 [Шаги и изменения по ФТ](docs/prototype_v4_steps.txt).
 [Атрибуты источников и всех промежуточных таблиц](docs/attributes_catalog.txt).
+[Сопоставление с последними скриншотами 0.png–13.png](docs/v4_vs_screenshots.txt).
+В самом SQL изменения выделены комментариями `[ИЗМЕНЕНО]` и `[НОВОЕ]`;
+старые номера строк в пометках относятся к скрипту на скриншотах.
 
 В V4 для КН/КК действует только связь
 `BDM.APPLICATION.application_rk = TAS.parent_application_rk`

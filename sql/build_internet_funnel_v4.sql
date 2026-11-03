@@ -1,5 +1,13 @@
 /*
 ПРОТОТИП V4. MISREP-4455 TECH_INTERNET_FUNNEL.
+СРАВНЕНИЕ: скриншоты 0.png–13.png из последнего сообщения пользователя.
+[ИЗМЕНЕНО] — изменённый блок/выражение относительно этого скрипта.
+[НОВОЕ] — отдельный шаг или CTE, которого там не было.
+[СОХРАНЕНО] — прежняя бизнес-логика; возможны переименования/форматирование.
+«Старые строки» — номера на скриншотах, не номера строк этого V4.
+Поиск пометок: [ИЗМЕНЕНО] и [НОВОЕ]. Карта: docs/v4_vs_screenshots.txt.
+[ИЗМЕНЕНО] Шапка, старые строки 1–59: объект и заявка исправлены на TIF/MISREP-4455;
+итог без истории версий; неиспользуемые параметры источников/режима связи удалены.
 Актуальная версия по ФТ от 03.11.2026. Таблицы прототипа: man_prt_tif_.
 Регламент целевого объекта: ежедневно после обновления источников;
 начальное наполнение с 01.01.2025, далее пересчёт с начала прошлого квартала.
@@ -92,6 +100,8 @@ DISTINCT сохранён только в исходном RAW-этапе 1.1. �
 -- ==================== 1. КН/КК: КОПИЯ TQS -> ФЛАГ -> ЗАЯВКА ====================
 
 -- Шаг 1.1. Очистка и подгонка RAW, как в начале tech_questionnaire_status.
+-- [СОХРАНЕНО] Старые строки 61–139: исходная очистка, MIN даты, ROW_NUMBER и DISTINCT.
+-- [ИЗМЕНЕНО] Старый вывод строки 137 раскрыт явным списком полей; имена таблиц согласованы.
 -- Откуда: исходный prt_tqs_questionnaire, скриншот строк 53–131.
 -- Зачем: сохранить исходную очистку и MIN/ROW_NUMBER; продуктовые ветки ниже оставят только КН/КК.
 -- Копирование: исходный prt_tqs_questionnaire; явно перечислить поля и сохранить src_cd_src и application_num.
@@ -171,6 +181,7 @@ where 1=1
   and cast(coalesce(r.questionnaire_dt, r.business_dt, r.createtime_dttm) as timestamp)
       >= cast(&p_rds_report_dt_date as timestamp)
 )
+-- [ИЗМЕНЕНО] Старые строки 137–138: явная проекция вместо звёздочки, rn = 1 сохранено.
 select
     p.questionnaire_id,
     p.application_num,
@@ -195,6 +206,8 @@ where p.rn = 1
 ) distributed randomly;
 
 -- Шаг 1.2. Ветка KK: продукт и статусы исходного TQS.
+-- [СОХРАНЕНО] Старые строки 142–195: продукт КК, CASE статусов, условия ветки и длина ID.
+-- [ИЗМЕНЕНО] Технически: единые имена таблиц без повторного tif_; квалифицированные имена полей.
 -- Откуда: раздел «Кредитные карты», строки 134–187 tech_questionnaire_status.
 -- Зачем: присвоить level25_product_bp_nm тем же способом; далее продукт фильтруется по этому полю.
 -- Копирование: можно полностью скопировать из tech_questionnaire_status; заменить только имена таблиц/макроимена.
@@ -248,6 +261,8 @@ where 1=1
 ) distributed randomly;
 
 -- Шаг 1.3. Ветка KN: продукт и статусы исходного TQS.
+-- [СОХРАНЕНО] Старые строки 197–306: продукт КН, статусы, все 47 приоритетов и отбор ветки.
+-- [ИЗМЕНЕНО] Технически: имена таблиц/алиасов согласованы с соседними шагами.
 -- Откуда: раздел «Кредит наличными», строки 190–299 tech_questionnaire_status.
 -- Зачем: присвоить level25_product_bp_nm тем же способом; далее продукт фильтруется по этому полю.
 -- Копирование: можно полностью скопировать из tech_questionnaire_status; заменить только имена таблиц/макроимена.
@@ -357,6 +372,10 @@ where 1=1
 ) distributed randomly;
 
 -- Шаг 1.4. Сдвиг совпадающих времён статусов только КН.
+-- [СОХРАНЕНО] Старые строки 308–398: сдвиг совпавшего времени по приоритету статусов КН.
+-- [ИЗМЕНЕНО] Убрана сортировка только для авто; переименование UTM/status перенесено в 1.5.
+-- [ИЗМЕНЕНО] Технические границы: первый diff_sec равен 1 вместо -1, сравнение >= вместо >;
+--               для первой строки и равенства число добавленных секунд остаётся тем же.
 -- Откуда: prt_tqs_kn_auto_dk_questionnaire, строки 659–787 tech_questionnaire_status.
 -- Зачем: сохранить исходное построение effective_from_dttm, не добавляя отдельные проверки.
 -- Копирование: скопировать исходный шаг; оставить только КН и пронести application_num через оба SELECT.
@@ -425,6 +444,8 @@ from kn_pre_eff_calc
 ) distributed randomly;
 
 -- Шаг 1.5. Общий поток КН/КК с application_num.
+-- [СОХРАНЕНО] Старые строки 400–452: UNION ALL КК/КН, application_num сохранён в обеих ветках.
+-- [ИЗМЕНЕНО] Явные поля/переименования согласованы с выходом 1.4; таблицы названы единообразно.
 -- Откуда: prt_tqs_questionnaire_all, строки 789–840 tech_questionnaire_status.
 -- Зачем: получить исходный состав TQS после переименований UTM/status/src и сохранить номер заявки.
 -- Копирование: скопировать UNION КК/КН; убрать остальные продукты, добавить application_num в оба плеча.
@@ -477,6 +498,8 @@ from &db_sbx.man_prt_tif_tqs_kn_timeline kn
 ) distributed randomly;
 
 -- Шаг 1.6. Получение RK и интервалов TQS для КН/КК.
+-- [ИЗМЕНЕНО] Старые строки 454–498: RK берётся из готовой TQS вместо TQXC.
+--               Актуальные пары ID/RK сгруппированы, отсутствующие RK исключены; INNER JOIN сохранён.
 -- Откуда: готовая tech_questionnaire_status, по уточнённому ФТ; исходные данные — результат 1.5.
 -- Зачем: взять готовый RK анкеты из TQS, сохранив подготовленные статусы и все application_num.
 -- Копирование: в финальной сборке TQS заменить источник RK на готовую TQS; убрать повторы пар ID/RK.
@@ -511,6 +534,7 @@ select
     ) as timestamp) as effective_to_dttm,
     cast(&p_report_timestamp as timestamp) as processed_dttm
 from &db_sbx.man_prt_tif_tqs_questionnaire_all base
+-- [ИЗМЕНЕНО] Старые строки 485–496: источник RK — актуальная TQS, не TQXC.
 inner join (
     select questionnaire_id, questionnaire_rk
     from &p_db_cdmr.tech_questionnaire_status
@@ -522,8 +546,10 @@ inner join (
 ) distributed randomly;
 
 -- Шаг 1.7. Предварительный флаг верификации КН/КК по всей истории TQS.
+-- [СОХРАНЕНО] Старые строки 500–548: MAX по всей истории и спискам статусов продукта.
+-- [ИЗМЕНЕНО] Это предварительный флаг: найденная связь с TAS выставит true в 1.13/2.3.
 -- Откуда: новый шаг; MAX(CASE) взят из стиля флагов tech_application_status, статусы — из выделений Excel.
--- Зачем: рассчитать флаг для анкет без связи; при найденной связи шаг 1.11 установит true.
+-- Зачем: рассчитать флаг для анкет без связи; при найденной связи шаг 1.13 установит true.
 -- Копирование: это добавляемый шаг, целиком из TQS его скопировать нельзя.
 drop table if exists &db_sbx.man_prt_tif_kn_kk_verification;
 create table &db_sbx.man_prt_tif_kn_kk_verification
@@ -574,6 +600,8 @@ inner join verification v
 ) distributed randomly;
 
 -- Шаг 1.8. Одна анкета КН/КК после расчёта флага по истории.
+-- [НОВОЕ] После старых строк 500–548: отдельная база анкет RK + продукт, независимо от номера.
+--           MIN даты и MAX флага сворачивают историю, а не атрибуты TAS.
 -- Откуда: история 1.7; итоговая витрина по ФТ не хранит версии статусов.
 -- Зачем: сохранить все анкеты, включая не имеющие application_num; агрегировать историю, не строки TAS.
 drop table if exists &db_sbx.man_prt_tif_kn_kk_questionnaire;
@@ -595,6 +623,8 @@ having min(q.questionnaire_dttm) >= cast(&P_BEGIN_DATE as timestamp)
 ) distributed randomly;
 
 -- Шаг 1.9. Все номера анкеты, пережившие исходную дедупликацию.
+-- [НОВОЕ] Из старого большого BDM-шага (550–580) выделено отношение анкета/продукт/номер.
+--           Повторы номера на разных статусах свернуты по ключу; все разные номера сохраняются.
 -- Откуда: application_num из исходной цепочки TQS; ключ связи — анкета, продукт, номер.
 -- Зачем: один номер не должен повторяться из-за статусов; разные номера сохраняются.
 drop table if exists &db_sbx.man_prt_tif_kn_kk_numbers;
@@ -617,6 +647,10 @@ group by q.questionnaire_rk, q.level25_product_bp_nm, q.application_num
 ) distributed randomly;
 
 -- Шаг 1.10. application_num -> ключ BDM.APPLICATION.
+-- [ИЗМЕНЕНО] Вместо старых строк 550–580: перевод только ключей номеров в ключи BDM, без DISTINCT.
+--               LEFT JOIN заменён INNER JOIN в мосте; все анкеты отдельно сохранены в 1.8.
+--               Убраны ограничения старой даты создания родителя и списка источников BDM;
+--               источник теперь проверяется по parent_src_cd при соединении в 1.12.
 -- Откуда: ФТ 1.2, строка 4; источник ключа далее сравнивается с parent_src_cd TAS.
 -- Зачем: свернуть только повтор одной связи через разные номера; не выбирать случайную заявку.
 drop table if exists &db_sbx.man_prt_tif_kn_kk_bdm;
@@ -632,6 +666,7 @@ select
     app.application_rk as bdm_application_rk,
     app.src_cd as bdm_src_cd
 from &db_sbx.man_prt_tif_kn_kk_numbers q
+-- [ИЗМЕНЕНО] Старые строки 569–577: источник ключа не ограничивается прежними кодами/датой родителя.
 inner join &p_db_bdm.application app
     on app.application_num = q.application_num
    and app.effective_to_date = cast(&p_max_date as date)
@@ -641,6 +676,9 @@ group by q.questionnaire_rk, q.level25_product_bp_nm, app.application_rk, app.sr
 ) distributed randomly;
 
 -- Шаг 1.11. Готовая TAS КН/КК без удаления дублей.
+-- [ИЗМЕНЕНО] Старые строки 582–619: TAS без DISTINCT; COALESCE(RK, -1) вместо NULLIF.
+--               Отбор по продукту вместо источников; NULL-продукт разрешён при найденной целевой анкете.
+--               Дополнительно исключены строки без обоих реальных заявочных ключей.
 -- Откуда: TAS, предоставленный состав 22 полей; отбор по продуктам из ФТ 1.2.1.
 -- Зачем: сохранить все исходные строки; DISTINCT не должен скрывать нарушение ключа TAS.
 drop table if exists &db_sbx.man_prt_tif_kn_kk_tas;
@@ -651,6 +689,7 @@ with (APPENDONLY = true,
       COMPRESSLEVEL = 5)
 as (
 select
+-- [ИЗМЕНЕНО] Старые строки 592/601: оба заявочных ключа сохраняют -1 вместо превращения в NULL.
     coalesce(t.parent_application_rk, -1) as parent_application_rk,
     t.parent_application_id,
     t.parent_application_dt,
@@ -674,6 +713,7 @@ select
     t.level35_product_bp_nm,
     t.processed_dttm
 from &p_db_cdmr.tech_application_status t
+-- [ИЗМЕНЕНО] Отбор по продукту и отдельно оговорённая связь для NULL-продукта.
 where (t.level25_product_bp_nm in (&p_quest_25lvl_product_kn_list, &p_quest_25lvl_product_kk_list)
        or (t.level25_product_bp_nm is null and exists (
            select 1 from &db_sbx.man_prt_tif_kn_kk_bdm q
@@ -687,6 +727,9 @@ where (t.level25_product_bp_nm in (&p_quest_25lvl_product_kn_list, &p_quest_25lv
 ) distributed randomly;
 
 -- Шаг 1.12. Единственное соединение BDM -> родительский ключ TAS.
+-- [ИЗМЕНЕНО] Полная замена старого JOIN в строках 621–670: только родительский ключ + его источник.
+--               Прямой путь, отдельный путь собственного RK УЗ и переключатель режимов удалены.
+--               GROUP BY хранит ключи отношений; полные строки TAS не дедуплицируются.
 -- Откуда: ФТ 1.2.4: app.application_rk = tas.parent_application_rk; совпадение источников.
 -- Зачем: получить ключи найденных пар; прямой путь на tas.application_rk исключён.
 drop table if exists &db_sbx.man_prt_tif_kn_kk_matches;
@@ -703,6 +746,7 @@ select
     t.application_rk
 from &db_sbx.man_prt_tif_kn_kk_bdm q
 inner join &db_sbx.man_prt_tif_kn_kk_tas t
+-- [ИЗМЕНЕНО] Старые строки 660–669: единственное условие ключа, источник — родительский.
     on q.bdm_application_rk = t.parent_application_rk
    and q.bdm_src_cd = t.parent_src_cd
 group by q.questionnaire_rk, q.level25_product_bp_nm,
@@ -710,6 +754,9 @@ group by q.questionnaire_rk, q.level25_product_bp_nm,
 ) distributed randomly;
 
 -- Шаг 1.13. Анкеты КН/КК и найденные заявки через LEFT JOIN.
+-- [ИЗМЕНЕНО] Вместо старых строк 672–759: одна анкетная ветка LEFT JOIN, без трёх частей и DISTINCT.
+--               Заявки без анкеты перенесены в общий шаг 3.2. При связи флаг true; отсутствующие RK -1.
+--               level35 берётся только из собственного поля TAS; исправлены старые недоступные алиасы.
 -- Откуда: ФТ: анкеты без заявки сохраняются; наличие связи устанавливает флаг true.
 -- Зачем: каждую анкету без связи вывести один раз; заявки без анкеты будут добавлены только в 3.2.
 drop table if exists &db_sbx.man_prt_tif_kn_kk_fin;
@@ -722,6 +769,7 @@ as (
 select
     cast(q.questionnaire_rk as bigint) as questionnaire_rk,
     cast(q.questionnaire_dttm as timestamp) as questionnaire_dttm,
+-- [ИЗМЕНЕНО] Старая строка 684: найденная заявка устанавливает true независимо от статусов.
     cast(case
         when t.parent_application_rk is not null or t.application_rk is not null then true
         else q.quest_verification_flg
@@ -740,9 +788,11 @@ select
     cast(t.final_approved_flg as boolean) as final_approved_flg,
     cast(t.agr_signed_flg as boolean) as agr_signed_flg,
     cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level25_product_bp_nm,
+-- [ИЗМЕНЕНО] Старые строки 699/721: собственное поле TAS; без заявки/значения — NULL.
     cast(t.level35_product_bp_nm as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
 from &db_sbx.man_prt_tif_kn_kk_questionnaire q
+-- [ИЗМЕНЕНО] Здесь сохраняется только анкетная сторона; остаток TAS добавляется в 3.2.
 left join &db_sbx.man_prt_tif_kn_kk_matches m
     on m.questionnaire_rk = q.questionnaire_rk
    and m.level25_product_bp_nm = q.level25_product_bp_nm
@@ -752,6 +802,9 @@ left join &db_sbx.man_prt_tif_kn_kk_tas t
 ) distributed randomly;
 
 -- Шаг 2.1. Готовая TQS авто и предварительный флаг верификации по истории.
+-- [ИЗМЕНЕНО] Старые строки 761–782: исторический MAX сначала считается по RK/продукту без ID.
+-- [НОВОЕ] Затем current_ids берёт актуальный ID из TQS; старые ID не создают лишние строки.
+--           MIN даты и все статусы истории сохраняются; RK NULL/-1 исключаются.
 -- Откуда: tech_questionnaire_status напрямую; MAX(CASE) — стиль флагов tech_application_status.
 -- Зачем: вычислить флаг по всей истории, затем получить актуальный ID анкеты для связи со снимком TAS.
 -- Копирование: новая агрегация готовой TQS; имена status_cd/RK/даты/продукта — из её DDL.
@@ -776,7 +829,9 @@ where q.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
 group by q.questionnaire_rk, q.level25_product_bp_nm
 having min(q.questionnaire_dttm) >= cast(&P_BEGIN_DATE as timestamp)
     or min(q.questionnaire_dttm) is null
-), current_ids as (
+),
+-- [НОВОЕ] Текущий ID выбирается ПОСЛЕ исторического флага, а не вместо истории.
+current_ids as (
 select
     q.questionnaire_id,
     q.questionnaire_rk,
@@ -801,6 +856,9 @@ inner join current_ids q
 ) distributed randomly;
 
 -- Шаг 2.2. Готовая TAS авто без удаления дублей.
+-- [ИЗМЕНЕНО] Старые строки 784–820: TAS без DISTINCT, COALESCE ключей вместо NULLIF.
+--               Отбор по продукту авто вместо источника; NULL-продукт — только при связи с анкетой.
+--               TAS уже хранит последнее состояние; выбор версии по processed_dttm не добавляется.
 -- Откуда: TAS, предоставленный состав 22 полей; продукт из ФТ 1.2.1.
 -- Зачем: взять последнее состояние каждой заявки, которое хранит TAS; дополнительные версии не выбираются.
 drop table if exists &db_sbx.man_prt_tif_auto_tas;
@@ -811,6 +869,7 @@ with (APPENDONLY = true,
       COMPRESSLEVEL = 5)
 as (
 select
+-- [ИЗМЕНЕНО] Старые строки 794/803: оба заявочных ключа сохраняют -1 вместо превращения в NULL.
     coalesce(t.parent_application_rk, -1) as parent_application_rk,
     t.parent_application_id,
     t.parent_application_dt,
@@ -834,6 +893,7 @@ select
     t.level35_product_bp_nm,
     t.processed_dttm
 from &p_db_cdmr.tech_application_status t
+-- [ИЗМЕНЕНО] Отбор по продукту и отдельно оговорённая связь для NULL-продукта.
 where (t.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
        or (t.level25_product_bp_nm is null and exists (
            select 1 from &db_sbx.man_prt_tif_auto_verification q
@@ -846,6 +906,9 @@ where (t.level25_product_bp_nm = cast(&p_quest_25lvl_product_auto_list as text)
 ) distributed randomly;
 
 -- Шаг 2.3. Анкеты авто и найденные заявки через LEFT JOIN.
+-- [ИЗМЕНЕНО] Старые строки 823–854: FULL JOIN заменён LEFT JOIN от текущих ID анкет.
+--               Исправлены имена входных таблиц; флаг при связи true; отсутствующие RK -1.
+--               level35 — собственное поле TAS. Оставшиеся заявки добавляются только в 3.2.
 -- Откуда: ФТ 1.2.3: актуальный questionnaire_id TQS = application_id снимка TAS.
 -- Зачем: сохранить анкетную сторону; остаток TAS добавляется отдельно, не через FULL JOIN.
 drop table if exists &db_sbx.man_prt_tif_auto_fin;
@@ -858,6 +921,7 @@ as (
 select
     cast(q.questionnaire_rk as bigint) as questionnaire_rk,
     cast(q.questionnaire_dttm as timestamp) as questionnaire_dttm,
+-- [ИЗМЕНЕНО] Старая строка 834: найденная заявка устанавливает true независимо от статусов.
     cast(case
         when t.parent_application_rk is not null or t.application_rk is not null then true
         else q.quest_verification_flg
@@ -876,14 +940,18 @@ select
     cast(t.final_approved_flg as boolean) as final_approved_flg,
     cast(t.agr_signed_flg as boolean) as agr_signed_flg,
     cast(coalesce(t.level25_product_bp_nm, q.level25_product_bp_nm) as text) as level25_product_bp_nm,
+-- [ИЗМЕНЕНО] Старые строки 849: собственное поле TAS; без заявки/значения — NULL.
     cast(t.level35_product_bp_nm as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
 from &db_sbx.man_prt_tif_auto_verification q
+-- [ИЗМЕНЕНО] Здесь сохраняется только анкетная сторона; остаток TAS добавляется в 3.2.
 left join &db_sbx.man_prt_tif_auto_tas t
     on q.questionnaire_id = t.application_id
 ) distributed randomly;
 
 -- Шаг 3.1. Первая таблица: все анкеты с найденными заявками или без них.
+-- [ИЗМЕНЕНО] Старые строки 856–908: эта первая таблица объединяет только анкетные ветки.
+--               Это ещё не весь итог: связанные заявки уже здесь, остаток добавится отдельно.
 -- Откуда: результаты 1.13 и 2.3; ФТ 1.2.5 требует исключить повторное добавление связанных заявок.
 -- Зачем: сформировать анкетную часть, относительно которой проверяется остаток TAS.
 drop table if exists &db_sbx.man_prt_tif_questionnaire_funnel;
@@ -939,6 +1007,9 @@ from &db_sbx.man_prt_tif_auto_fin a
 ) distributed randomly;
 
 -- Шаг 3.2. Только заявки TAS, не попавшие в первую таблицу.
+-- [НОВОЕ] Общая ветка остатка TAS вместо локального остатка КН/КК (старые строки 731–758)
+--           и заявочной стороны прежнего FULL JOIN авто. Проверяется вся первая таблица 3.1.
+--           NOT EXISTS использует полную пару ключей TAS; DISTINCT/UNION для подавления повторов нет.
 -- Откуда: ФТ 1.2.5: исключить заявки, уже соединившиеся с анкетами.
 -- Зачем: NOT EXISTS по полному ключу TAS; дочерние заявки одной УЗ не исключают друг друга.
 drop table if exists &db_sbx.man_prt_tif_remaining_tas;
@@ -1017,9 +1088,11 @@ select
     cast(t.final_approved_flg as boolean) as final_approved_flg,
     cast(t.agr_signed_flg as boolean) as agr_signed_flg,
     cast(t.level25_product_bp_nm as text) as level25_product_bp_nm,
+-- [СОХРАНЕНО] Старая строка 749 уже брала собственный уровень 35 TAS; убран лишь COALESCE с NULL.
     cast(t.level35_product_bp_nm as text) as level35_product_bp_nm,
     cast(&p_report_timestamp as timestamp(0)) as processed_dttm
 from tas t
+-- [НОВОЕ] Общий остаток: полная пара RK отсутствует во всей анкетной таблице, а не только в своей ветке.
 where not exists (
     select 1
     from &db_sbx.man_prt_tif_questionnaire_funnel f
@@ -1029,6 +1102,8 @@ where not exists (
 ) distributed randomly;
 
 -- Шаг 3.3. Итог: первая таблица плюс только оставшиеся заявки.
+-- [ИЗМЕНЕНО] Вместо прежней конечной сборки (856–908): первая таблица + только остаток TAS.
+--               UNION ALL и состав 19 полей сохранены.
 -- Откуда: ФТ, 19 итоговых атрибутов; наборы разделены условием NOT EXISTS в 3.2.
 -- Зачем: исключить повторное добавление связанной заявки без маскировки DISTINCT.
 drop table if exists &db_sbx.man_prt_tif_tech_internet_funnel;
@@ -1082,3 +1157,6 @@ select
     t.processed_dttm
 from &db_sbx.man_prt_tif_remaining_tas t
 ) distributed randomly;
+
+-- [ИЗМЕНЕНО] Старые строки 910–923: проверка вынесена в sql/check_internet_funnel.sql.
+-- Отдельные SELECT вместо одновременных DISTINCT; наличие сущности проверяется по RK <> -1.
