@@ -1,243 +1,64 @@
-АТРИБУТЫ АКТУАЛЬНОГО ПРОТОТИПА V4
-================================
-SQL: sql/build_internet_funnel_v4.sql.
-Первые четыре объекта ниже — используемый контракт источников, не утверждение о полном DDL.
-TAS по подтверждению пользователя хранит только последнее состояние. Таблицы прототипа перечислены полностью.
-Типы показаны по известному SQL и синтетическому контракту; банковская БД здесь не опрашивалась.
-Внешний TQS исторически имеет ключ questionnaire_rk + effective_from_dttm.
-Ключ снимка TAS — parent_application_rk + application_rk, без временной части.
-level35_product_bp_nm берётся из собственного поля TAS; без заявки или значения — NULL.
-Три итоговых RK заполняются -1 при отсутствии сущности. Итог без временных полей версии.
+АТРИБУТЫ УПРОЩЁННОГО ПРОТОТИПА TIF V4
+=====================================
+SQL: sql/build_internet_funnel_v4.sql. По замечаниям от 05.11.2026.
+Ниже используемый контракт источников, не полный DDL банковских объектов.
+Анкетные атрибуты читаются из готовой TQS; из intention — ровно два поля.
+TAS хранит последний снимок; его ключ — parent_application_rk + application_rk.
+Исторический ключ TQS — questionnaire_rk + effective_from_dttm.
+Типы приведены по известному SQL/офлайн-контракту, банк здесь не опрашивался.
 
-ИСТОЧНИК: rd_raw_orb.v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention
+ИСТОЧНИК, ИСПОЛЬЗУЕМЫЕ ПОЛЯ: rd_raw_orb.v_sn_all_mart_dapp_prod_dm_dsa_cd_questionnaire_x_intention
   01. questionnaire_id | text
   02. application_num | text
-  03. utmcn | text
-  04. utmcmd | text
-  05. utmcsr | text
-  06. utmctr | text
-  07. utmcct | text
-  08. status | text
-  09. scoring_status_nm | text
-  10. prescoring_status_nm | text
-  11. product_type_code | text
-  12. program_type | text
-  13. src_cd | text
-  14. src_cd_src | text
-  15. questionnaire_dt | text
-  16. business_dt | text
-  17. createtime_dttm | text
-  18. prescoring_dt | text
-  19. scoring_dt | text
-  20. processed_dttm | text
-  21. sessionintention_id | text
-  22. globalclient_id | text
-  23. person_id | text
-  24. last_nm | text
-  25. first_nm | text
-  26. middle_nm | text
-  27. tax_payer_num | text
-  28. email | text
-  29. client_type | text
-  30. company_nm | text
-  31. phone_num | text
-  32. credit_amt | numeric
-  33. zero_visits_flg | smallint
-  34. spec_program | text
-  35. salary_card_flg | smallint
 
-ИСТОЧНИК: bdm.application
-  01. application_rk | bigint
-  02. application_num | text
+ИСТОЧНИК, ИСПОЛЬЗУЕМЫЕ ПОЛЯ: bdm.application
+  01. application_num | text
+  02. application_rk | bigint
   03. src_cd | text
   04. effective_to_date | date
-  05. application_begin_date | date
 
-ИСТОЧНИК: dm_pik_fd_cdmr.tech_questionnaire_status
+ИСТОЧНИК, ИСПОЛЬЗУЕМЫЕ ПОЛЯ: dm_pik_fd_cdmr.tech_questionnaire_status
   01. questionnaire_id | text
   02. questionnaire_rk | bigint
   03. questionnaire_dttm | timestamp
   04. status_cd | text
   05. level25_product_bp_nm | text
-  06. effective_from_dttm | timestamp
-  07. effective_to_dttm | timestamp
+  06. effective_to_dttm | timestamp
 
-ИСТОЧНИК: dm_pik_fd_cdmr.tech_application_status
+ИСТОЧНИК, ИСПОЛЬЗУЕМЫЕ ПОЛЯ: dm_pik_fd_cdmr.tech_application_status
   01. parent_application_rk | bigint
-  02. parent_src_cd | text
-  03. application_rk | bigint
-  04. src_cd | text
-  05. parent_application_id | text
-  06. parent_application_dt | date
-  07. parent_approved_dttm | timestamp
-  08. application_id | text
-  09. application_dt | date
-  10. application_type_cd | text
+  02. parent_application_dt | date
+  03. parent_src_cd | text
+  04. parent_open_flg | boolean
+  05. parent_prescoring_flg | boolean
+  06. parent_at_work_flg | boolean
+  07. parent_approved_flg | boolean
+  08. application_rk | bigint
+  09. application_id | text
+  10. application_dt | date
   11. deal_issue_date | date
-  12. level25_product_bp_nm | text
-  13. level35_product_bp_nm | text
-  14. parent_open_flg | boolean
-  15. parent_prescoring_flg | boolean
-  16. parent_at_work_flg | boolean
-  17. parent_approved_flg | boolean
-  18. create_flg | boolean
-  19. at_work_flg | boolean
-  20. final_approved_flg | boolean
-  21. agr_signed_flg | boolean
-  22. processed_dttm | timestamp
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_tqs_questionnaire
-  01. questionnaire_id | text
-  02. application_num | text
-  03. utmcn | text
-  04. utmcmd | text
-  05. utmcsr | text
-  06. utmctr | text
-  07. utmcct | text
-  08. status | text
-  09. scoring_status_nm | text
-  10. prescoring_status_nm | text
-  11. product_type_code | text
-  12. program_type | text
-  13. src_cd | text
-  14. questionnaire_dttm | timestamp
-  15. original_effective_from_dttm_auto_kn | timestamp
-  16. original_effective_from_dttm_kk_dk | timestamp
-  17. rn | bigint
-  18. src_cd_src | text
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_tqs_kk_questionnaire
-  01. application_num | text
-  02. questionnaire_id | text
-  03. utmcn | text
-  04. utmcmd | text
-  05. utmcsr | text
-  06. utmctr | text
-  07. utmcct | text
-  08. status | text
-  09. scoring_status_nm | text
-  10. prescoring_status_nm | text
-  11. program_type | text
-  12. src_cd_src | text
-  13. questionnaire_dttm | timestamp
-  14. product_type_cd | text
-  15. status_name | text
+  12. create_flg | boolean
+  13. at_work_flg | boolean
+  14. final_approved_flg | boolean
+  15. agr_signed_flg | boolean
   16. level25_product_bp_nm | text
-  17. effective_from_dttm | timestamp
+  17. level35_product_bp_nm | text
 
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_tqs_kn_questionnaire
-  01. application_num | text
-  02. questionnaire_id | text
-  03. utmcn | text
-  04. utmcmd | text
-  05. utmcsr | text
-  06. utmctr | text
-  07. utmcct | text
-  08. status | text
-  09. scoring_status_nm | text
-  10. prescoring_status_nm | text
-  11. program_type | text
-  12. src_cd_src | text
-  13. questionnaire_dttm | timestamp
-  14. product_type_cd | text
-  15. status_name | text
-  16. level25_product_bp_nm | text
-  17. status_priority | integer
-  18. original_effective_from_dttm | timestamp
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_tqs_kn_timeline
-  01. application_num | text
-  02. questionnaire_id | text
-  03. utmcn | text
-  04. utmcmd | text
-  05. utmcsr | text
-  06. utmctr | text
-  07. utmcct | text
-  08. status | text
-  09. scoring_status_nm | text
-  10. prescoring_status_nm | text
-  11. program_type | text
-  12. src_cd_src | text
-  13. questionnaire_dttm | timestamp
-  14. product_type_cd | text
-  15. status_name | text
-  16. level25_product_bp_nm | text
-  17. effective_from_dttm | timestamp
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_tqs_questionnaire_all
-  01. questionnaire_id | text
-  02. questionnaire_dttm | timestamp
-  03. utmcn_info | text
-  04. utmcmd_info | text
-  05. utmcsr_info | text
-  06. utmctr_info | text
-  07. utmcct_info | text
-  08. status_cd | text
-  09. scoring_status_nm | text
-  10. prescoring_status_nm | text
-  11. product_type_cd | text
-  12. status_name | text
-  13. program_type | text
-  14. src_cd | text
-  15. level25_product_bp_nm | text
-  16. effective_from_dttm | timestamp
-  17. application_num | text
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_tech_questionnaire_status
-  01. questionnaire_rk | bigint
-  02. questionnaire_id | text
-  03. questionnaire_dttm | timestamp
-  04. utmcn_info | text
-  05. utmcmd_info | text
-  06. utmcsr_info | text
-  07. utmctr_info | text
-  08. utmcct_info | text
-  09. status_cd | text
-  10. scoring_status_nm | text
-  11. prescoring_status_nm | text
-  12. product_type_cd | text
-  13. status_name | text
-  14. program_type | text
-  15. src_cd | text
-  16. level25_product_bp_nm | text
-  17. effective_from_dttm | timestamp
-  18. application_num | text
-  19. effective_to_dttm | timestamp
-  20. processed_dttm | timestamp
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_kn_kk_verification
-  01. questionnaire_rk | bigint
-  02. questionnaire_id | text
-  03. questionnaire_dttm | timestamp
-  04. utmcn_info | text
-  05. utmcmd_info | text
-  06. utmcsr_info | text
-  07. utmctr_info | text
-  08. utmcct_info | text
-  09. status_cd | text
-  10. scoring_status_nm | text
-  11. prescoring_status_nm | text
-  12. product_type_cd | text
-  13. status_name | text
-  14. program_type | text
-  15. src_cd | text
-  16. level25_product_bp_nm | text
-  17. effective_from_dttm | timestamp
-  18. application_num | text
-  19. effective_to_dttm | timestamp
-  20. processed_dttm | timestamp
-  21. quest_verification_flg | boolean
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_kn_kk_questionnaire
+ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_verification
   01. questionnaire_rk | bigint
   02. level25_product_bp_nm | text
+  03. quest_verification_flg | boolean
+
+ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_questionnaire
+  01. questionnaire_id | text
+  02. questionnaire_rk | bigint
   03. questionnaire_dttm | timestamp
   04. quest_verification_flg | boolean
+  05. level25_product_bp_nm | text
 
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_kn_kk_numbers
-  01. questionnaire_rk | bigint
-  02. level25_product_bp_nm | text
-  03. application_num | text
+ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_questionnaire_numbers
+  01. questionnaire_id | text
+  02. application_num | text
 
 ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_kn_kk_bdm
   01. questionnaire_rk | bigint
@@ -245,108 +66,30 @@ level35_product_bp_nm берётся из собственного поля TAS;
   03. bdm_application_rk | bigint
   04. bdm_src_cd | text
 
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_kn_kk_tas
+ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_tas
   01. parent_application_rk | bigint
-  02. parent_application_id | text
-  03. parent_application_dt | date
-  04. parent_src_cd | text
-  05. parent_approved_dttm | timestamp
-  06. parent_open_flg | boolean
-  07. parent_prescoring_flg | boolean
-  08. parent_at_work_flg | boolean
-  09. parent_approved_flg | boolean
-  10. application_rk | bigint
-  11. application_id | text
-  12. application_dt | date
-  13. src_cd | text
-  14. application_type_cd | text
-  15. deal_issue_date | date
-  16. create_flg | boolean
-  17. at_work_flg | boolean
-  18. final_approved_flg | boolean
-  19. agr_signed_flg | boolean
-  20. level25_product_bp_nm | text
-  21. level35_product_bp_nm | text
-  22. processed_dttm | timestamp
+  02. parent_application_dt | date
+  03. parent_src_cd | text
+  04. parent_open_flg | boolean
+  05. parent_prescoring_flg | boolean
+  06. parent_at_work_flg | boolean
+  07. parent_approved_flg | boolean
+  08. application_rk | bigint
+  09. application_id | text
+  10. application_dt | date
+  11. deal_issue_date | date
+  12. create_flg | boolean
+  13. at_work_flg | boolean
+  14. final_approved_flg | boolean
+  15. agr_signed_flg | boolean
+  16. level25_product_bp_nm | text
+  17. level35_product_bp_nm | text
 
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_kn_kk_matches
+ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_matches
   01. questionnaire_rk | bigint
   02. level25_product_bp_nm | text
   03. parent_application_rk | bigint
   04. application_rk | bigint
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_kn_kk_fin
-  01. questionnaire_rk | bigint
-  02. questionnaire_dttm | timestamp
-  03. quest_verification_flg | boolean
-  04. parent_application_rk | bigint
-  05. parent_application_dt | date
-  06. parent_open_flg | boolean
-  07. parent_prescoring_flg | boolean
-  08. parent_at_work_flg | boolean
-  09. parent_approved_flg | boolean
-  10. application_rk | bigint
-  11. application_dt | date
-  12. deal_issue_date | date
-  13. create_flg | boolean
-  14. at_work_flg | boolean
-  15. final_approved_flg | boolean
-  16. agr_signed_flg | boolean
-  17. level25_product_bp_nm | text
-  18. level35_product_bp_nm | text
-  19. processed_dttm | timestamp(0)
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_auto_verification
-  01. questionnaire_id | text
-  02. questionnaire_rk | bigint
-  03. questionnaire_dttm | timestamp
-  04. quest_verification_flg | boolean
-  05. level25_product_bp_nm | text
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_auto_tas
-  01. parent_application_rk | bigint
-  02. parent_application_id | text
-  03. parent_application_dt | date
-  04. parent_src_cd | text
-  05. parent_approved_dttm | timestamp
-  06. parent_open_flg | boolean
-  07. parent_prescoring_flg | boolean
-  08. parent_at_work_flg | boolean
-  09. parent_approved_flg | boolean
-  10. application_rk | bigint
-  11. application_id | text
-  12. application_dt | date
-  13. src_cd | text
-  14. application_type_cd | text
-  15. deal_issue_date | date
-  16. create_flg | boolean
-  17. at_work_flg | boolean
-  18. final_approved_flg | boolean
-  19. agr_signed_flg | boolean
-  20. level25_product_bp_nm | text
-  21. level35_product_bp_nm | text
-  22. processed_dttm | timestamp
-
-ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_auto_fin
-  01. questionnaire_rk | bigint
-  02. questionnaire_dttm | timestamp
-  03. quest_verification_flg | boolean
-  04. parent_application_rk | bigint
-  05. parent_application_dt | date
-  06. parent_open_flg | boolean
-  07. parent_prescoring_flg | boolean
-  08. parent_at_work_flg | boolean
-  09. parent_approved_flg | boolean
-  10. application_rk | bigint
-  11. application_dt | date
-  12. deal_issue_date | date
-  13. create_flg | boolean
-  14. at_work_flg | boolean
-  15. final_approved_flg | boolean
-  16. agr_signed_flg | boolean
-  17. level25_product_bp_nm | text
-  18. level35_product_bp_nm | text
-  19. processed_dttm | timestamp(0)
 
 ТАБЛИЦА ПРОТОТИПА: sbx_pre_orb_fd.man_prt_tif_questionnaire_funnel
   01. questionnaire_rk | bigint

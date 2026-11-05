@@ -52,56 +52,27 @@ select count(*) as invalid_missing_questionnaire_flags
 from sbx_pre_orb_fd.man_prt_tif_tech_internet_funnel
 where questionnaire_rk = -1 and quest_verification_flg is not null;
 
--- 8. Все анкеты по продуктам; один COUNT DISTINCT в запросе.
-with q as (
-    select questionnaire_rk, level25_product_bp_nm
-    from sbx_pre_orb_fd.man_prt_tif_kn_kk_questionnaire
-    union all
-    select questionnaire_rk, level25_product_bp_nm
-    from sbx_pre_orb_fd.man_prt_tif_auto_verification
-)
+-- 8. Все анкеты по продуктам готовой TQS, включая не имеющие номера.
 select level25_product_bp_nm, count(distinct questionnaire_rk) as questionnaire_count
-from q
+from sbx_pre_orb_fd.man_prt_tif_questionnaire
 group by level25_product_bp_nm;
 
--- 9. Связанные анкеты по исходному продукту анкеты.
-with q as (
-    select questionnaire_rk, level25_product_bp_nm
-    from sbx_pre_orb_fd.man_prt_tif_kn_kk_matches
-    union all
-    select questionnaire_rk, level25_product_bp_nm
-    from sbx_pre_orb_fd.man_prt_tif_auto_fin
-    where parent_application_rk <> -1 or application_rk <> -1
-)
+-- 9. Связанные анкеты по исходному продукту TQS.
 select level25_product_bp_nm, count(distinct questionnaire_rk) as linked_questionnaire_count
-from q
+from sbx_pre_orb_fd.man_prt_tif_matches
 group by level25_product_bp_nm;
 
 -- 10. Все заявочные пары по продуктам TAS.
-with t as (
-    select parent_application_rk, application_rk, level25_product_bp_nm
-    from sbx_pre_orb_fd.man_prt_tif_kn_kk_tas
-    union all
-    select parent_application_rk, application_rk, level25_product_bp_nm
-    from sbx_pre_orb_fd.man_prt_tif_auto_tas
-)
 select level25_product_bp_nm,
        count(distinct row(parent_application_rk, application_rk)) as application_count
-from t
+from sbx_pre_orb_fd.man_prt_tif_tas
 group by level25_product_bp_nm;
 
 -- 11. Связанные заявочные пары по исходному продукту TAS, как в знаменателе 10.
 -- NULL-продукт источника показывается отдельной группой, без смены знаменателя.
-with t as (
-    select parent_application_rk, application_rk, level25_product_bp_nm
-    from sbx_pre_orb_fd.man_prt_tif_kn_kk_tas
-    union all
-    select parent_application_rk, application_rk, level25_product_bp_nm
-    from sbx_pre_orb_fd.man_prt_tif_auto_tas
-)
 select t.level25_product_bp_nm,
        count(distinct row(t.parent_application_rk, t.application_rk)) as linked_application_count
-from t
+from sbx_pre_orb_fd.man_prt_tif_tas t
 where exists (
     select 1 from sbx_pre_orb_fd.man_prt_tif_questionnaire_funnel f
     where f.parent_application_rk = t.parent_application_rk
@@ -110,15 +81,8 @@ where exists (
 group by t.level25_product_bp_nm;
 
 -- 12. Пропавшие заявочные пары; ожидается пустой результат.
-with t as (
-    select parent_application_rk, application_rk
-    from sbx_pre_orb_fd.man_prt_tif_kn_kk_tas
-    union all
-    select parent_application_rk, application_rk
-    from sbx_pre_orb_fd.man_prt_tif_auto_tas
-)
 select t.parent_application_rk, t.application_rk
-from t
+from sbx_pre_orb_fd.man_prt_tif_tas t
 where not exists (
     select 1 from sbx_pre_orb_fd.man_prt_tif_tech_internet_funnel f
     where f.parent_application_rk = t.parent_application_rk
