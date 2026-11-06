@@ -1,6 +1,29 @@
 # TECH_INTERNET_FUNNEL — MISREP-4455
 
-Актуальный прототип: [build_internet_funnel_v4.sql](sql/build_internet_funnel_v4.sql).
+Новая версия по замечаниям от 06.11.2026:
+[build_internet_funnel_v5.sql](sql/build_internet_funnel_v5.sql).
+V4 сохранена без изменений. V5 создаёт отдельные таблицы `man_prt_tif_v5_`,
+итог — `&db_sbx.man_prt_tif_v5_tech_internet_funnel`.
+[Точные изменения по шагам и ответы на вопросы о фильтрах](docs/prototype_v5_changes.txt),
+[проверки V5](sql/check_internet_funnel_v5.sql).
+
+В V5 мост intention выбирает один непустой номер на ID через `ROW_NUMBER()`
+с полным исходным порядком TQS. Отличие: раздел окна — ID без статуса.
+Группировки связей убраны: причина повторов intention устраняется до соединений.
+Атрибуты TAS переносятся без повторного присоединения её снимка.
+Полного исходного ETL TAS в доступных файлах нет, его приоритеты не выдуманы.
+Готовые TQS/TAS сохраняют свои контракты, нарушения проверяются отдельно.
+Проверка разных номеров у одной анкеты в предоставленном банковском срезе пуста;
+на новом срезе это контролируется проверкой 16. Взаимное 1:1 между всеми
+анкетами, номерами и дочерними заявками не предполагается.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 /workspace/.venvs/qas/bin/python tests/validate_prototype_v5.py
+```
+
+Далее описана сохранённая V4; её ограничения на два поля intention относятся к V4.
+
+Предыдущий прототип V4: [build_internet_funnel_v4.sql](sql/build_internet_funnel_v4.sql).
 Упрощён по замечаниям от 05.11.2026: внутренний ETL TQS удалён из TIF.
 Итог: `&db_sbx.man_prt_tif_tech_internet_funnel`, 19 согласованных атрибутов.
 [Назначение шагов](docs/prototype_v4_steps.txt),
