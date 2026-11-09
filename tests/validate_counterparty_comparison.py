@@ -1,4 +1,4 @@
-"""Synthetic comparison only: bridge-version predicates are example contracts."""
+"""Synthetic template checks; cx.uniq_counterparty_rk is a fixture field, not a verified bank contract."""
 from pathlib import Path
 import re
 from decimal import Decimal
@@ -12,7 +12,10 @@ MACROS={
  'db_sbx':'sbx_pre_orb_fd','p_db_cdmr':'dm_pik_fd_cdmr','p_db_bdm':'bdm',
  'p_max_date':"'2999-12-31'",
  'p_qc_current_condition':"qc.effective_to_dttm = timestamp '2999-12-31'",
- 'p_cc_current_condition':"cc.effective_to_dttm = timestamp '2999-12-31'",
+ 'p_counterparty_link_table':'bdm.counterparty_x_uniq_counterparty',
+ # Fixture-only example: the real join/schema is awaiting source confirmation.
+ 'p_global_to_counterparty_condition':'cx.uniq_counterparty_rk = qc.customer_global_rk',
+ 'p_cp_current_condition':"cx.effective_to_dttm = timestamp '2999-12-31'",
 }
 KN='Потребкредит'; KK='Кредитные карты'; AUTO='Автокредит'
 
@@ -45,9 +48,10 @@ def fixture():
         parent_application_rk bigint,application_rk bigint,parent_src_cd text,
         level25_product_bp_nm text);
       create table dm_pik_fd_cdmr.tech_questionnaire_x_customer (
-        questionnaire_rk bigint,customer_rk bigint,effective_to_dttm timestamp);
-      create table dm_pik_fd_cdmr.tech_customer_x_counterparty (
-        customer_rk bigint,counterparty_rk bigint,effective_to_dttm timestamp);
+        questionnaire_rk bigint,customer_global_rk bigint,effective_from_dttm timestamp,
+        effective_to_dttm timestamp);
+      create table bdm.counterparty_x_uniq_counterparty (
+        uniq_counterparty_rk bigint,counterparty_rk bigint,effective_to_dttm timestamp);
       create table bdm.application (
         application_rk bigint,src_cd text,application_num text,counterparty_rk bigint,
         effective_to_date date);''')
@@ -55,16 +59,19 @@ def fixture():
                    [(f'Q{i}',i,KN if i<5 else KK if i<7 else AUTO) for i in range(1,8)])
     db.executemany('insert into sbx_pre_orb_fd.man_prt_tif_v5_questionnaire_numbers values (?,?)',
                    [('Q1','N1'),('Q3','N3'),('Q5','N5'),('Q7','AUTO')])
-    qc=[(1,11,'2999-12-31'),(1,11,'2999-12-31'),(1,12,'2999-12-31'),
+    qc=[(1,11,'2999-12-31'),(1,11,'2024-12-31'),(1,12,'2999-12-31'),
+        (1,14,'2999-12-31'),
         (1,13,'2999-12-31'),(2,22,'2999-12-31'),(3,33,'2024-12-31'),
         (4,44,'2999-12-31'),(5,55,'2999-12-31'),(6,-1,'2999-12-31'),
         (6,66,'2999-12-31')]
     cc=[(11,201,'2999-12-31'),(11,201,'2999-12-31'),(12,201,'2999-12-31'),
+        (14,201,'2999-12-31'),
         (13,202,'2999-12-31'),(22,202,'2999-12-31'),(33,204,'2999-12-31'),
         (44,204,'2999-12-31'),(55,206,'2999-12-31'),(55,205,'2024-12-31'),
         (-1,201,'2999-12-31'),(66,-1,'2999-12-31')]
-    db.executemany('insert into dm_pik_fd_cdmr.tech_questionnaire_x_customer values (?,?,?)',qc)
-    db.executemany('insert into dm_pik_fd_cdmr.tech_customer_x_counterparty values (?,?,?)',cc)
+    db.executemany('insert into dm_pik_fd_cdmr.tech_questionnaire_x_customer values (?,?,?,?)',
+                   [(q,c,'2023-01-01' if end=='2024-12-31' else '2025-01-01',end) for q,c,end in qc])
+    db.executemany('insert into bdm.counterparty_x_uniq_counterparty values (?,?,?)',cc)
     apps=[(401,'MSSA','N1',201,'2999-12-31'),(402,'MSSA','N2',202,'2999-12-31'),
           (403,'MSSA','N3',203,'2999-12-31'),(404,'MSSA','N4',204,'2999-12-31'),
           (405,'MSSA','N5',205,'2999-12-31'),(406,'MSSA','N6',206,'2999-12-31'),
@@ -81,6 +88,10 @@ def fixture():
 
 def test_same_population_and_ambiguity():
     db=fixture()
+    assert db.execute('''select questionnaire_rk,customer_global_rk,effective_from_dttm,count(*)
+        from dm_pik_fd_cdmr.tech_questionnaire_x_customer
+        group by questionnaire_rk,customer_global_rk,effective_from_dttm
+        having count(*)>1''').fetchall()==[]
     before=db.execute('select count(*) from sbx_pre_orb_fd.man_prt_tif_v5_tas').fetchone()
     result=run(db)
     q={(p,r):(total,linked,Decimal(str(pct))) for p,r,total,linked,pct in result[0]}
@@ -100,7 +111,7 @@ def test_same_population_and_ambiguity():
     assert result[4]==[(5,KK,406,507,KK),(1,KN,402,503,KN),
                        (1,KN,407,508,None),(2,KN,402,503,KN),(4,KN,404,505,KN)]
     paths={(r,p):(raw,edges) for r,p,raw,edges in result[5]}
-    assert paths[('COUNTERPARTY_RK',KN)]==(18,6)
+    assert paths[('COUNTERPARTY_RK',KN)]==(15,6)
     assert paths[('APPLICATION_NUM',KN)]==(3,3)
     assert db.execute('select count(*) from sbx_pre_orb_fd.man_prt_tif_v5_tas').fetchone()==before
     assert run(db)==result
@@ -121,4 +132,4 @@ def test_empty_cohort():
 if __name__=='__main__':
     test_same_population_and_ambiguity()
     test_empty_cohort()
-    print('Synthetic DuckDB + PostgreSQL parsing only. Source bridge schemas/current-version contracts and bank coverage are not measured here.')
+    print('Synthetic DuckDB + PostgreSQL parsing only. Real crosswalk join/schema/current-version predicates and bank coverage remain unconfirmed.')

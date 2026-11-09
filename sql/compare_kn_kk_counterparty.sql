@@ -1,13 +1,21 @@
 /*
 СРАВНЕНИЕ СХОДИМОСТИ КН/КК: APPLICATION_NUM И COUNTERPARTY_RK.
-Запускать ПО ПОРЯДКУ в одной сессии после построения V5.
+ШАБЛОН: перед запуском требуется подтвердить JOIN с counterparty_x_uniq_counterparty.
+Имена полей этого JOIN и правило актуальности пока не восстановлены.
+После подстановки подтверждённых параметров запускать по порядку после V5.
 Витрина и её таблицы не меняются; создаются четыре временные таблицы pg_temp.
 
 Маршруты:
   APPLICATION_NUM: TQS -> intention (готовый мост V5) -> BDM.APPLICATION -> TAS.
   COUNTERPARTY_RK: TQS -> tech_questionnaire_x_customer по questionnaire_rk
-    -> tech_customer_x_counterparty по customer_rk
-    -> BDM.APPLICATION по counterparty_rk -> TAS.
+    -> customer_global_rk -> counterparty_x_uniq_counterparty
+    -> counterparty_rk -> BDM.APPLICATION по counterparty_rk -> TAS.
+Поле counterparty_x_uniq_counterparty для перехода от customer_global_rk
+НЕ ПОДТВЕРЖДЕНО; одноимённость/равенство с uniq_counterparty_rk не предполагается.
+Уникальный ключ tech_questionnaire_x_customer по уточнению пользователя:
+    questionnaire_rk, customer_global_rk, effective_from_dttm.
+Он определяет запись истории, но не задаёт правило выбора текущего среза.
+Все подходящие клиенты анкеты сохраняются, а не отбираются одним ROW_NUMBER.
 Оба маршрута заканчиваются ОДИНАКОВО:
   BDM.application_rk = TAS.parent_application_rk,
   BDM.src_cd = TAS.parent_src_cd.
@@ -22,18 +30,22 @@ NULL-продукты TAS сравниваются в той же базе, ко
 
 Макроподстановки:
   &db_sbx    — схема прототипа, по умолчанию sbx_pre_orb_fd.
-  &p_db_cdmr — схема двух таблиц связей, предполагается dm_pik_fd_cdmr.
+  &p_db_cdmr — схема tech_questionnaire_x_customer, предполагается dm_pik_fd_cdmr.
   &p_db_bdm  — схема APPLICATION, по умолчанию bdm.
+  &p_counterparty_link_table — ПОДТВЕРЖДЁННОЕ полное имя таблицы
+      counterparty_x_uniq_counterparty, со схемой. Схема пока не подтверждена.
+  &p_global_to_counterparty_condition — ПОДТВЕРЖДЁННОЕ SQL-условие перехода
+      от qc.customer_global_rk к таблице cx (counterparty_x_uniq_counterparty).
+      Конкретное поле cx пока неизвестно; готового значения по умолчанию нет.
   &p_max_date — текущая версия BDM, по умолчанию '2999-12-31'.
 
   &p_qc_current_condition — SQL-условие актуальности связи анкета/клиент,
       с алиасом qc. Из прежнего TQS известно условие:
       qc.effective_to_dttm = timestamp '2999-12-31'
-  &p_cc_current_condition — SQL-условие актуальности связи клиент/контрагент,
-      с алиасом cc. Поле/правило этой таблицы ПОКА НЕ ПОДТВЕРЖДЕНО.
-      Если её контракт аналогичен TQXC, значение будет:
-      cc.effective_to_dttm = timestamp '2999-12-31'
+  &p_cp_current_condition — SQL-условие актуальности связи в
+      counterparty_x_uniq_counterparty, алиас cx; правило пока не подтверждено.
       Для подтверждённого неверсионного снимка можно указать true.
+      Состав ключа TQXC не подтверждает наличие effective_to_dttm в другой таблице.
 Условия подставляются как SQL без внешних кавычек. Не заменять их на true
 только ради запуска: объединение всех исторических связей завысит кандидатов.
 Схемы и названия полей актуальности сначала сверить по метаданным (SELECT 0).
@@ -57,24 +69,27 @@ COUNTERPARTY_RK даёт кандидатов по клиенту: разные 
 -- SELECT 0. Необязательная проверка метаданных перед запуском расчёта.
 select table_schema, table_name, column_name, data_type
 from information_schema.columns
-where table_name in ('tech_questionnaire_x_customer', 'tech_customer_x_counterparty')
+where table_name in ('tech_questionnaire_x_customer', 'counterparty_x_uniq_counterparty')
 order by table_schema, table_name, ordinal_position;
 
--- 1. Связи анкета -> клиент -> контрагент. Все текущие пути сохраняются.
+-- 1. Связи анкета -> глобальный клиент -> контрагент.
+-- Условия JOIN и актуальности должны быть подтверждены; все подходящие пути сохраняются.
 drop table if exists pg_temp.man_prt_tif_cp_links;
 create temporary table man_prt_tif_cp_links on commit preserve rows as (
 select q.questionnaire_rk, q.level25_product_bp_nm,
-       qc.customer_rk, cc.counterparty_rk
+       qc.customer_global_rk,
+       qc.effective_from_dttm as questionnaire_customer_effective_from_dttm,
+       cx.counterparty_rk
 from &db_sbx.man_prt_tif_v5_questionnaire q
 inner join &p_db_cdmr.tech_questionnaire_x_customer qc
     on qc.questionnaire_rk = q.questionnaire_rk
    and (&p_qc_current_condition)
-inner join &p_db_cdmr.tech_customer_x_counterparty cc
-    on cc.customer_rk = qc.customer_rk
-   and (&p_cc_current_condition)
+inner join &p_counterparty_link_table cx
+    on (&p_global_to_counterparty_condition)
+   and (&p_cp_current_condition)
 where q.level25_product_bp_nm in ('Потребкредит', 'Кредитные карты')
-  and qc.customer_rk is not null and qc.customer_rk <> -1
-  and cc.counterparty_rk is not null and cc.counterparty_rk <> -1
+  and qc.customer_global_rk is not null and qc.customer_global_rk <> -1
+  and cx.counterparty_rk is not null and cx.counterparty_rk <> -1
 ) distributed by (questionnaire_rk);
 
 -- 2. Общий снимок текущих заявок BDM, найденных хотя бы одним маршрутом.
@@ -105,7 +120,9 @@ drop table if exists pg_temp.man_prt_tif_cp_paths;
 create temporary table man_prt_tif_cp_paths on commit preserve rows as (
 select cast('APPLICATION_NUM' as text) as route,
        q.questionnaire_rk, q.level25_product_bp_nm as questionnaire_product,
-       cast(null as bigint) as customer_rk, app.counterparty_rk,
+       cast(null as bigint) as customer_global_rk,
+       cast(null as timestamp) as questionnaire_customer_effective_from_dttm,
+       app.counterparty_rk,
        app.application_rk as bdm_application_rk, app.src_cd as bdm_src_cd,
        t.parent_application_rk, t.application_rk,
        t.level25_product_bp_nm as tas_product
@@ -123,7 +140,8 @@ where q.level25_product_bp_nm in ('Потребкредит', 'Кредитны�
 union all
 select cast('COUNTERPARTY_RK' as text),
        c.questionnaire_rk, c.level25_product_bp_nm,
-       c.customer_rk, c.counterparty_rk,
+       c.customer_global_rk, c.questionnaire_customer_effective_from_dttm,
+       c.counterparty_rk,
        app.application_rk, app.src_cd,
        t.parent_application_rk, t.application_rk, t.level25_product_bp_nm
 from pg_temp.man_prt_tif_cp_links c
