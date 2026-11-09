@@ -43,6 +43,12 @@ PYTHONDONTWRITEBYTECODE=1 /workspace/.venvs/qas/bin/python tests/validate_protot
 проверки сохранности проверяют подготовку источников, LEFT JOIN, остаток и финал.
 Период должен совпадать с запуском V5. Проверка: `tests/validate_step_counts.py`.
 
+Описание целевого объекта для ТИС ИС 1480_2:
+[раздел 3.1 — процесс формирования TECH_INTERNET_FUNNEL](docs/tis_3_1_tech_internet_funnel.txt).
+Текст в UTF-8: источники, отбор, ранжирование номера, верификация, связи,
+состав результата, регламент и ограничения заполнения источников.
+Разделы 3.5/S2T и 4.5 в этот файл не включены.
+
 Далее описана сохранённая V4; её ограничения на два поля intention относятся к V4.
 
 Предыдущий прототип V4: [build_internet_funnel_v4.sql](sql/build_internet_funnel_v4.sql).
